@@ -1,4 +1,4 @@
-// swift-tools-version:4.2
+// swift-tools-version:6.0
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -6,13 +6,13 @@ import PackageDescription
 let package = Package(
     name: "export-ulysses",
     dependencies: [
-        .package(url: "https://github.com/kylef/Commander.git", from: "0.8.0")
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.6.2")
     ],
     targets: [
         // Targets are the basic building blocks of a package. A target can define a module or a test suite.
         // Targets can depend on other targets in this package, and on products in packages which this package depends on.
-        .target(
-            name: "export-ulysses",
-            dependencies: ["Commander"]),
+        .target(name: "export-ulysses", dependencies: [
+            .product(name: "ArgumentParser", package: "swift-argument-parser")
+        ]),
     ]
 )
