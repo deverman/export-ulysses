@@ -3,298 +3,89 @@ import ArgumentParser
 
 //: - Private Interface
 
-let fileManager = FileManager()
-private var verbose = false
-func vprint(_ thing: Any) {
-  if (verbose) {
-    print(thing)
-  }
+private let keysToFetch: [URLResourceKey] = [.isDirectoryKey, .creationDateKey, .contentModificationDateKey]
+
+private enum ExportJob: Sendable {
+    case copyItem(source: URL, destination: URL, createdDate: Date, modifiedDate: Date)
 }
 
-struct Tag {
-    let name: String
-    let attributes: [String: String]
-}
+final class Exporter {
+    private let fileManager = FileManager.default
+    private let verbose: Bool
+    private let includeHiddenUlyssesMetadata: Bool
+    private let maxConcurrentExports: Int
 
-class Parser: NSObject, XMLParserDelegate {
-    static let parserManager = FileManager()
-
-    let xmlParser: XMLParser
-    let outputStream: OutputStream
-    let from: URL
-    let to: URL
-    let key: String
-    let createdDate: Date
-    let modifiedDate: Date
-    let appendMeta: Bool
-    let completionHandler: (String) -> Void
-
-    private var writingBegan = false
-    private var waitingForTitle = false
-    private var title: String?
-    private var keywords = ""
-    private var attachments = ""
-    private var tags: [Tag] = []
-    private var currentTag: Tag? {
-        return tags.last
-    }
-    private var currentLink: String = ""
-
-    init?(key: String, from url: URL, to destination: String,
-          createdDate: Date, modifiedDate: Date, appendMeta: Bool,
-          completionHandler: @escaping (String) -> Void) {
-        guard let parser = XMLParser(contentsOf: url), let outputStream = OutputStream(toFileAtPath: destination, append: false) else {
-            return nil
-        }
-        self.key = key
-        self.from = url
-        self.to = URL(fileURLWithPath: destination)
-        self.xmlParser = parser
-        self.outputStream = outputStream
-        self.createdDate = createdDate
-        self.modifiedDate = modifiedDate
-        self.appendMeta = appendMeta
-        self.completionHandler = completionHandler
-        super.init()
-        self.xmlParser.delegate = self
+    init(verbose: Bool, includeHiddenUlyssesMetadata: Bool = false, maxConcurrentExports: Int = 2) {
+        self.verbose = verbose
+        self.includeHiddenUlyssesMetadata = includeHiddenUlyssesMetadata
+        self.maxConcurrentExports = max(1, maxConcurrentExports)
     }
 
-    func parse() -> Bool {
-        return self.xmlParser.parse()
-    }
+    func run(_ input: String, _ output: String, keepGroups: Bool, ignoring: [String]) async throws {
+        print("Starting export...")
 
-    func parserDidStartDocument(_ parser: XMLParser) {
-        self.outputStream.open()
-    }
+        let inputURL = URL(fileURLWithPath: input)
+        let outputURL = URL(fileURLWithPath: output)
+        try fileManager.createDirectory(at: outputURL, withIntermediateDirectories: true, attributes: nil)
 
-    func parserDidEndDocument(_ parser: XMLParser) {
-        if self.appendMeta {
-            self.writeEndMatter()
-        }
-        self.outputStream.close()
+        var directoryYAML: OutputStream?
+        if keepGroups {
+            directoryYAML = OutputStream(toFileAtPath: outputURL.appendingPathComponent("directories.yml").path, append: false)
+            directoryYAML?.open()
+            write("""
+            ---
+            note_directories:
 
-        var wroteTo = self.to
-
-        if let title = self.title {
-            let cleanTitle = title
-                .replacingOccurrences(of: "/", with: "-")
-                .replacingOccurrences(of: "\\", with: "")
-                .replacingOccurrences(of: ":", with: " - ")
-            var destination = self.to.deletingLastPathComponent().appendingPathComponent(cleanTitle).appendingPathExtension("txt")
-            var version = 0
-            while Parser.parserManager.fileExists(atPath: destination.path.removingPercentEncoding ?? destination.path) {
-                version += 1
-                destination = destination.deletingLastPathComponent().appendingPathComponent("\(cleanTitle) (\(version))").appendingPathExtension("txt")
-            }
-            do {
-                try Parser.parserManager.moveItem(atPath: self.to.path, toPath: destination.path.removingPercentEncoding ?? destination.path)
-                wroteTo = destination
-            }
-            catch(let error) {
-                vprint("Error exporting \(wroteTo): \(error)")
-            }
+            """, to: directoryYAML)
         }
 
-        vprint("Exported \(wroteTo)")
-        try? Parser.parserManager.setAttributes([
-            FileAttributeKey.creationDate: self.createdDate,
-            FileAttributeKey.modificationDate: self.modifiedDate
-            ], ofItemAtPath: wroteTo.path)
-
-        self.completionHandler(self.key)
-    }
-
-    func parser(_ parser: XMLParser, parseErrorOccurred parseError: Error) {
-        print("Error during parse: \(parseError)")
-        print("In parser: \(key)")
-        print("Parsing \(self.from)")
-        print("To \(self.to)")
-        self.outputStream.close()
-        self.completionHandler(self.key)
-        fatalError()
-    }
-
-    func parser(_ parser: XMLParser,
-                didStartElement elementName: String,
-                namespaceURI: String?,
-                qualifiedName qName: String?,
-                attributes attributeDict: [String : String] = [:]) {
-        self.tags.append(Tag(name: elementName, attributes: attributeDict))
-    }
-
-    func parser(_ parser: XMLParser,
-                didEndElement elementName: String,
-                namespaceURI: String?,
-                qualifiedName qName: String?) {
-        if elementName == "element" && currentTag?.attributes["kind"] == "link" {
-            self.currentLink = ""
-        }
-        else if elementName == "p" {
-            waitingForTitle = false
-            writeString("\n")
-        }
-        else if elementName == "tag" &&
-            currentTag?.attributes["kind"]?.starts(with: "heading") ?? false &&
-            !writingBegan {
-            waitingForTitle = true
-        }
-        self.tags.removeLast()
-    }
-
-    func parser(_ parser: XMLParser,
-                foundCharacters string: String) {
-        let currentKind = currentTag?.attributes["kind"]
-        let parent = tags.count >= 2 ? tags[tags.count - 2] : nil
-
-        let str = string
-            .replacingOccurrences(of: "&amp;gt;", with: ">")
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&lt;", with: "<")
-
-        switch currentTag?.name {
-        case "p":
-            saveTitle(str)
-            writingBegan = true
-            writeString(str)
-        case "tag":
-            writeString(str)
-        case "attribute" where currentTag?.attributes["identifier"] == "URL":
-            self.currentLink.append(contentsOf: str)
-        case "attribute" where currentTag?.attributes["identifier"] == "title" &&
-            (parent?.attributes["kind"] == "link" || parent?.attributes["kind"] == "image"):
-            break
-        case "attribute" where currentTag?.attributes["identifier"] == "image" &&
-            parent?.attributes["kind"] == "image":
-            writeString("(image with ID \(str))")
-            break
-        case "element" where currentKind == "link":
-            saveTitle(str)
-            writeString("[\(str)](\(self.currentLink))")
-        case "element" where currentKind == "strong":
-            writeString("**\(str)**")
-        case "element" where currentKind == "emph":
-            writeString("_\(str)_")
-        case "element" where currentKind == "code":
-            writeString("`\(str)`")
-        case "element" where currentKind == "inlineNative":
-            writeString("```\(str)```")
-        case "element" where currentKind == "delete":
-            writeString("~~\(str)~~")
-        case "element" where currentKind == "annotation":
-            writeString("\(str): ")
-        case "attachment" where currentTag?.attributes["type"] == "keywords":
-            keywords += str
-        case "attachment" where currentTag?.attributes["type"] == "file":
-            attachments += str
-        case "escape":
-            let unescaped = str.replacingOccurrences(of: "\\", with: "")
-            if (parent?.attributes["kind"] == "link") {
-                self.currentLink.append(contentsOf: unescaped)
-            }
-            else {
-                writeString(unescaped)
-            }
-        case "sheet", "markup", "string":
-            break
-        default:
-            print("UNKNOWN TAG: \(currentTag?.name ?? "NONE")");
-            print(currentTag?.attributes ?? [:])
-            print("PARENT: \(parent?.name ?? "NONE")")
-            print(parent?.attributes ?? [:])
-            fatalError("unknown tag")
-            break
-        }
-    }
-
-    private func saveTitle(_ string: String) {
-        guard waitingForTitle || self.title == nil else { return }
-
-        var formattedTitle = string.trimmingCharacters(in: .whitespacesAndNewlines)
-        if formattedTitle.starts(with: ".") {
-            formattedTitle = "> \(formattedTitle)"
-        }
-        guard formattedTitle != "&" else { return }
-        if waitingForTitle {
-            self.title = (self.title ?? "").appending(formattedTitle)
-        }
-        else if self.title == nil {
-            var words = formattedTitle.split(separator: " ")
-            var titleBuilder = ""
-            while titleBuilder.count < 80 && !words.isEmpty {
-                let word = words.removeFirst()
-                titleBuilder += word + " "
-            }
-            self.title = String(titleBuilder.trimmingCharacters(in: .whitespacesAndNewlines))
-        }
-    }
-
-    private func writeString(_ string: String) {
-        let dataArray = [UInt8](string.utf8)
-        self.outputStream.write(dataArray, maxLength: dataArray.count)
-    }
-
-    private func writeEndMatter() {
-        let endMatter = """
-        \n\n
-        --- Exported from Ulysses on \(Date()) ---
-        KEYWORDS: \(self.keywords)
-        ATTACHMENTS: \(self.attachments)
-        CREATED DATE: \(DateFormatter.localizedString(from: self.createdDate, dateStyle: .long, timeStyle: .long))
-        MODIFIED DATE: \(DateFormatter.localizedString(from: self.modifiedDate, dateStyle: .long, timeStyle: .long))
-        """
-
-        writeString(endMatter)
-    }
-}
-
-var sheetTotal = 0;
-var parsers: [String: Parser] = [:]
-let KeysToFetch: [URLResourceKey] = [.isDirectoryKey, .creationDateKey, .contentModificationDateKey]
-
-func crawl(_ url: URL, output: String, preservingFolders: Bool = false, withMeta: Bool = true, ignoringFolders: [String], onFoundDirectory: ((String) -> Void)? = nil) {
-    vprint("Scanning \(url)...")
-    let outputURL = URL(fileURLWithPath: output)
-    let resourceValues = try? url.resourceValues(forKeys: Set(KeysToFetch))
-    let isDirectory = resourceValues?.isDirectory ?? false
-    if isDirectory, let results = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: KeysToFetch) {
-
-        // If directory is a sheet
-        if url.pathExtension == "ulysses" {
-            let fileName = url.deletingPathExtension().lastPathComponent
-            let key = UUID().uuidString
-            let from = url.appendingPathComponent("Content.xml")
-            let to = outputURL.appendingPathComponent("\(fileName).txt")
-            let createdDate = resourceValues?.creationDate ?? Date()
-            let modifiedDate = resourceValues?.contentModificationDate ?? Date()
-            let onComplete = { key in
-                parsers[key] = nil
-            }
-
-            let parser = Parser(
-                key: key,
-                from: from,
-                to: to.path,
-                createdDate: createdDate,
-                modifiedDate: modifiedDate,
-                appendMeta: withMeta,
-                completionHandler: onComplete
-            )
-
-            if let parser = parser {
-                parsers[key] = parser
-                let parseStarted = parser.parse()
-                if (parseStarted) {
-                    sheetTotal += 1
-
-                    if (sheetTotal % 500 == 0) {
-                        print("Exported \(sheetTotal) sheets.")
-                    }
+        let jobs = try crawl(
+            inputURL,
+            output: outputURL.path,
+            preservingFolders: keepGroups,
+            ignoringFolders: ignoring,
+            onFoundDirectory: { path in
+                if keepGroups {
+                    self.write("- \"\(path)\"\n", to: directoryYAML)
                 }
             }
+        )
+
+        directoryYAML?.close()
+
+        let exportedTotal = try await export(jobs)
+        print("Exported \(exportedTotal) items.")
+    }
+
+    private func crawl(_ url: URL, output: String, preservingFolders: Bool = false, ignoringFolders: [String], onFoundDirectory: ((String) -> Void)? = nil) throws -> [ExportJob] {
+        vprint("Scanning \(url)...")
+        let outputURL = URL(fileURLWithPath: output)
+        let resourceValues = try url.resourceValues(forKeys: Set(keysToFetch))
+        let isDirectory = resourceValues.isDirectory ?? false
+        guard isDirectory else {
+            guard !url.lastPathComponent.hasPrefix(".Ulysses-") else { return [] }
+
+            return [.copyItem(
+                source: url,
+                destination: outputURL.appendingPathComponent(url.lastPathComponent),
+                createdDate: resourceValues.creationDate ?? Date(),
+                modifiedDate: resourceValues.contentModificationDate ?? Date()
+            )]
+        }
+
+        let results = try fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: keysToFetch)
+
+        if url.pathExtension == "textbundle" {
+            return [.copyItem(
+                source: url,
+                destination: outputURL.appendingPathComponent(url.lastPathComponent),
+                createdDate: resourceValues.creationDate ?? Date(),
+                modifiedDate: resourceValues.contentModificationDate ?? Date()
+            )]
         }
         else if results.count == 1 && results[0].lastPathComponent == "Info.ulfilter" {
             // TODO: Handle filters?
+            return []
         }
         else {
             var name = url.lastPathComponent
@@ -311,74 +102,140 @@ func crawl(_ url: URL, output: String, preservingFolders: Bool = false, withMeta
             }
 
             // Ignore matching groups
-            if !ignoringFolders.contains(name) {
-                // Process and crawl group
-                let newOutput = preservingFolders ? outputURL.appendingPathComponent(name) : outputURL
-                try? fileManager.createDirectory(at: newOutput, withIntermediateDirectories: true, attributes: nil)
-                let newOutputPath = newOutput.path
+            guard !ignoringFolders.contains(name), shouldExportDirectory(url) else {
+                return []
+            }
 
-                onFoundDirectory?(newOutputPath)
+            // Process and crawl group
+            let newOutput = preservingFolders ? outputURL.appendingPathComponent(name) : outputURL
+            try fileManager.createDirectory(at: newOutput, withIntermediateDirectories: true, attributes: nil)
+            let newOutputPath = newOutput.path
 
-                for item in results {
-                    crawl(item, output: newOutputPath, preservingFolders: preservingFolders, withMeta: withMeta, ignoringFolders: ignoringFolders, onFoundDirectory: onFoundDirectory)
+            onFoundDirectory?(newOutputPath)
+
+            var jobs: [ExportJob] = []
+            for item in results {
+                jobs.append(contentsOf: try crawl(item, output: newOutputPath, preservingFolders: preservingFolders, ignoringFolders: ignoringFolders, onFoundDirectory: onFoundDirectory))
+            }
+            return jobs
+        }
+    }
+
+    private func export(_ jobs: [ExportJob]) async throws -> Int {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            var nextJobIndex = 0
+
+            func enqueueNextJob() {
+                guard nextJobIndex < jobs.count else { return }
+                let job = jobs[nextJobIndex]
+                nextJobIndex += 1
+                group.addTask {
+                    try exportJob(job)
                 }
             }
+
+            for _ in 0..<min(maxConcurrentExports, jobs.count) {
+                enqueueNextJob()
+            }
+
+            var exported = 0
+            for try await _ in group {
+                exported += 1
+                enqueueNextJob()
+                if exported % 500 == 0 {
+                    print("Exported \(exported) items.")
+                }
+            }
+            return exported
         }
+    }
+
+    private func shouldExportDirectory(_ url: URL) -> Bool {
+        includeHiddenUlyssesMetadata || !url.lastPathComponent.hasPrefix(".Ulysses-")
+    }
+
+    private func vprint(_ thing: Any) {
+        if verbose {
+            print(thing)
+        }
+    }
+
+    private func write(_ string: String, to stream: OutputStream?) {
+        let data = [UInt8](string.utf8)
+        stream?.write(data, maxLength: data.count)
     }
 }
 
-func run(_ input: String, _ output: String, keepGroups: Bool, skipMeta: Bool, ignoring: [String]) {
-    print("Starting export...")
-
-    // Prep input and output
-    let inputURL = URL(fileURLWithPath: input)
-    let outputURL = URL(fileURLWithPath: output)
-    try? fileManager.createDirectory(at: URL(fileURLWithPath: output), withIntermediateDirectories: true, attributes: nil)
-
-    // Write the directory yaml log, if applicable
-    var directoryYAML: OutputStream?
-    if keepGroups {
-        directoryYAML = OutputStream(toFileAtPath: outputURL.appendingPathComponent("directories.yml").path, append: false)!
-        directoryYAML?.open()
-        let header = """
----
-note_directories:
-
-"""
-        let headerArray = [UInt8](header.utf8)
-        directoryYAML?.write(headerArray, maxLength: headerArray.count)
+private func exportJob(_ job: ExportJob) throws {
+    switch job {
+    case let .copyItem(source, destination, createdDate, modifiedDate):
+        try copyItem(from: source, to: destination, createdDate: createdDate, modifiedDate: modifiedDate)
     }
+}
 
-    // Start crawl!
-    crawl(inputURL,
-          output: outputURL.path,
-          preservingFolders: keepGroups,
-          withMeta: !skipMeta,
-          ignoringFolders: ignoring,
-          onFoundDirectory: { path in
-            if keepGroups {
-                let data = [UInt8]("- \"\(path)\"\n".utf8)
-                directoryYAML?.write(data, maxLength: data.count)
-            }
-    })
+private func copyItem(from source: URL, to destination: URL, createdDate: Date, modifiedDate: Date) throws {
+    try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: nil)
+    let availableDestination = availableDestination(for: destination)
+    if FileManager.default.fileExists(atPath: availableDestination.path) {
+        try FileManager.default.removeItem(at: availableDestination)
+    }
+    try FileManager.default.copyItem(at: source, to: availableDestination)
+    try FileManager.default.setAttributes([
+        .creationDate: createdDate,
+        .modificationDate: modifiedDate
+    ], ofItemAtPath: availableDestination.path)
+    try FileManager.default.setAttributes([
+        .creationDate: createdDate,
+        .modificationDate: modifiedDate
+    ], ofItemAtPath: availableDestination.path)
+}
 
-    directoryYAML?.close()
-
-    print("Exported \(sheetTotal) sheets.")
+private func availableDestination(for destination: URL) -> URL {
+    var availableDestination = destination
+    let baseName = destination.deletingPathExtension().lastPathComponent
+    let pathExtension = destination.pathExtension
+    var version = 0
+    while FileManager.default.fileExists(atPath: availableDestination.path) {
+        version += 1
+        var nextDestination = destination
+            .deletingLastPathComponent()
+            .appendingPathComponent("\(baseName) (\(version))")
+        if !pathExtension.isEmpty {
+            nextDestination.appendPathExtension(pathExtension)
+        }
+        availableDestination = nextDestination
+    }
+    return availableDestination
 }
 
 //: - Public Interface
 
-let main = command(
-    Argument<String>("input", description: "The path to your Ulysses notes. See README for hints on what this might be."),
-    Argument<String>("output", description: "The path you want to export notes to."),
-    Flag("keep-groups", description: "Create directories for each Ulysses Group, and export notes into them."),
-    Flag("skip-meta", description: "Don’t append Ulysses keywords, attachment info, create date, and modify date to files. Files will still have the correct system create and modify dates."),
-    Flag("verbose", flag: "v", description: "Log export activity and debugging statements."),
-    VariadicOption<String>("ignore", description: "Groups to ignore on export")
-) { input, output, keepGroups, skipMeta, v, ignoring in
-    verbose = v
-    run(input, output, keepGroups: keepGroups, skipMeta: skipMeta, ignoring: ignoring)
-}
+@main
+struct ExportUlysses: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "export-ulysses",
+        abstract: "Export a Ulysses library to an FSNotes-friendly folder."
+    )
 
-main.run()
+    @Argument(help: "The path to your Ulysses notes.")
+    var input: String
+
+    @Argument(help: "The path you want to export notes to.")
+    var output: String
+
+    @Flag(help: "Create directories for each Ulysses Group, and export notes into them.")
+    var keepGroups = false
+
+    @Flag(name: .shortAndLong, help: "Log export activity and debugging statements.")
+    var verbose = false
+
+    @Option(name: .long, parsing: .upToNextOption, help: "Groups to ignore on export.")
+    var ignore: [String] = []
+
+    @Option(help: "Maximum number of items to export concurrently.")
+    var jobs = 2
+
+    func run() async throws {
+        try await Exporter(verbose: verbose, maxConcurrentExports: jobs).run(input, output, keepGroups: keepGroups, ignoring: ignore)
+    }
+}
