@@ -1,64 +1,94 @@
 # export-ulysses
 
-Exports your Ulysses 40 iCloud library into an FSNotes-friendly folder.
+Exports a Ulysses backup into FSNotes-readable TextBundle notes.
 
-- Exports Ulysses 40 iCloud libraries that contain `.md` files and `.textbundle` packages.
-- Preserves TextBundle packages intact so FSNotes can read note text, `info.json`, and `assets/`.
-- Copies visible loose resource files such as images and PDFs.
-- Runs exports concurrently with Swift structured concurrency.
-- Exported files have creation and modification dates that match your notes.
+This tool targets Ulysses 40 on macOS 26 Tahoe. It reads Ulysses backup packages (`.ulbackup`) instead of only copying the iCloud Drive TextBundle folder, because the backup `Content.xml` files include Ulysses inspector/sidebar data such as notes, file attachments, keywords, comments, and media references.
 
 ## Installing
 
-export-ulysses targets macOS 26 Tahoe and builds with Swift 6.3.2 plus the current `swift-argument-parser` package. You’ll need to [install Xcode](https://developer.apple.com/xcode/) or another Swift 6.3 toolchain to build it.
+You need Swift 6.3.2 or newer.
 
-```
-git clone git@github.com:kevboh/export-ulysses.git
+```sh
+git clone git@github.com:deverman/export-ulysses.git
 cd export-ulysses
 swift run export-ulysses --help
 ```
 
-If you plan to do this often, you may want to build a release binary with `swift build -c release` and copy it into your PATH.
+For repeated use, build a release binary:
 
-## Usage (--help)
-
-```
-USAGE: export-ulysses <input> <output> [--keep-groups] [--verbose] [--ignore <ignore> ...] [--jobs <jobs>]
-
-ARGUMENTS:
-  <input>                 The path to your Ulysses notes.
-  <output>                The path you want to export notes to.
-
-OPTIONS:
-  --keep-groups           Create directories for each Ulysses Group, and export notes into them.
-  -v, --verbose           Log export activity and debugging statements.
-  --ignore <ignore> ...   Groups to ignore on export.
-  --jobs <jobs>           Maximum number of items to export concurrently. Defaults to 2.
-  -h, --help              Show help information.
+```sh
+swift build -c release
 ```
 
-### Okay, give me those input hints
+## Usage
 
-Ulysses 40 iCloud Drive libraries may store sheets under `~/Library/Mobile Documents/com~apple~CloudDocs/Ulysses/`.
-
-Example:
-
+```sh
+swift run export-ulysses \
+  "$HOME/Library/Group Containers/X5AZV975AG.com.soulmen.shared/Ulysses/Backups/Latest Backup.ulbackup" \
+  ./FSNotesImport \
+  --keep-groups \
+  --jobs 4
 ```
-swift run export-ulysses "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Ulysses" ./FSNotesImport --keep-groups --jobs 2
+
+Arguments:
+
+- `input`: a Ulysses `.ulbackup` folder, usually `Latest Backup.ulbackup`
+- `output`: the folder where FSNotes TextBundles should be written
+
+Options:
+
+- `--keep-groups`: preserve Ulysses group folders in the output
+- `--ignore <group>`: skip matching Ulysses groups
+- `--jobs <count>`: convert sheets concurrently
+- `--verbose`: print additional discovery/export progress
+
+## What Is Exported
+
+Each Ulysses sheet becomes one FSNotes-readable `.textbundle`:
+
+```text
+Example.textbundle/
+  text.markdown
+  info.json
+  assets/
 ```
 
-### FSNotes Export
+The exporter preserves:
 
-FSNotes supports `.textbundle` containers. This exporter therefore preserves Ulysses TextBundles instead of flattening them:
+- Main sheet text
+- Headings, lists, links, emphasis, strong text, inline code, comments, footnotes, highlights, and deleted text where Markdown can represent them
+- Inline images and image descriptions
+- Ulysses sidebar notes, written into a visible `## Ulysses Sidebar Notes` section
+- Ulysses sidebar file attachments, copied to `assets/` and linked from `## Ulysses Attachments`
+- Ulysses keywords, written into `## Ulysses Keywords`
+- Ulysses tables, converted to Markdown tables
+- Group hierarchy when `--keep-groups` is used
+- FSNotes-compatible TextBundle `info.json`
 
-- `Example.textbundle/text.md`
-- `Example.textbundle/info.json`
-- `Example.textbundle/assets/`
+Ulysses-only data that FSNotes cannot model directly is made visible in Markdown instead of hidden in custom JSON. FSNotes currently decodes only a small TextBundle metadata shape, so sidebar notes and keywords are intentionally rendered into the note body where FSNotes can display and search them.
 
-Plain `.md` notes and visible loose files are copied as-is. Hidden Ulysses metadata folders and files are skipped.
+## Known Degradations
 
-The exporter has been smoke-tested against a Ulysses 40 iCloud Drive library at `~/Library/Mobile Documents/com~apple~CloudDocs/Ulysses/`, exporting 314 Markdown/TextBundle notes plus loose visible resources with `--keep-groups`.
+- Ulysses inspector/sidebar placement is not preserved as UI; the data is preserved as visible Markdown sections.
+- Ulysses image alignment and sizing hints are flattened to normal Markdown image links.
+- Missing or stale media references are reported as `Missing media references`.
+- Unsupported XML nodes are counted in the export summary so you can see whether additional Ulysses markup needs a converter.
 
-## Caveats
+## Real Library Validation
 
-This tool targets the Ulysses 40 iCloud Drive format. It intentionally does not support older `.ulysses/Content.xml` libraries.
+Validated against:
+
+```text
+~/Library/Group Containers/X5AZV975AG.com.soulmen.shared/Ulysses/Backups/Latest Backup.ulbackup
+```
+
+The validation run exported:
+
+- 2,631 sheets
+- 265 sidebar notes
+- 56 sidebar file attachments
+- 597 inline images
+- 466 keywords
+- 570 copied asset files
+
+Run the export into a temporary folder first, then point FSNotes at the resulting folder once the report looks right.

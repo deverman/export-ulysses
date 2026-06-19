@@ -12,8 +12,11 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.8.2")
     ],
     targets: [
+        .target(name: "UlyssesExporter"),
         .executableTarget(name: "export-ulysses", dependencies: [
+            "UlyssesExporter",
             .product(name: "ArgumentParser", package: "swift-argument-parser")
         ]),
+        .testTarget(name: "UlyssesExporterTests", dependencies: ["UlyssesExporter"])
     ]
 )
