@@ -41,5 +41,12 @@ struct ExportUlysses: AsyncParsableCommand {
         Missing media references: \(summary.missingMedia)
         Unsupported XML nodes: \(summary.unsupportedNodes)
         """)
+
+        if !summary.unsupportedDetails.isEmpty {
+            print("Unsupported XML detail:")
+            for (key, count) in summary.unsupportedDetails.sorted(by: { $0.value > $1.value }) {
+                print("- \(key): \(count)")
+            }
+        }
     }
 }

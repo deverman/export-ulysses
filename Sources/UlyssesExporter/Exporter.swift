@@ -8,6 +8,7 @@ public struct ExportSummary: Sendable, Equatable {
     public var keywords = 0
     public var missingMedia = 0
     public var unsupportedNodes = 0
+    public var unsupportedDetails: [String: Int] = [:]
 
     public mutating func add(_ other: ExportSummary) {
         sheets += other.sheets
@@ -17,6 +18,14 @@ public struct ExportSummary: Sendable, Equatable {
         keywords += other.keywords
         missingMedia += other.missingMedia
         unsupportedNodes += other.unsupportedNodes
+        for (key, value) in other.unsupportedDetails {
+            unsupportedDetails[key, default: 0] += value
+        }
+    }
+
+    public mutating func recordUnsupported(_ key: String) {
+        unsupportedNodes += 1
+        unsupportedDetails[key, default: 0] += 1
     }
 }
 
@@ -396,7 +405,9 @@ struct MarkdownRenderer {
         }
 
         if !sheet.unsupportedAttachmentTypes.isEmpty {
-            context.summary.unsupportedNodes += sheet.unsupportedAttachmentTypes.count
+            for type in sheet.unsupportedAttachmentTypes {
+                context.summary.recordUnsupported("attachment:\(type)")
+            }
             sections.append("## Ulysses Migration Notes\n\nUnsupported attachment types: \(sheet.unsupportedAttachmentTypes.joined(separator: ", "))")
         }
 
@@ -436,7 +447,7 @@ struct MarkdownRenderer {
             case "p":
                 return renderParagraph(children, context: &context)
             default:
-                context.summary.unsupportedNodes += 1
+                context.summary.recordUnsupported("block:\(name)")
                 let text = renderInline(node, context: &context).trimmingCharacters(in: .whitespacesAndNewlines)
                 return text.isEmpty ? nil : text
             }
@@ -558,14 +569,14 @@ struct MarkdownRenderer {
             switch name {
             case "element":
                 return renderUlyssesElement(kind: attributes["kind"], children: children, context: &context)
-            case "attribute", "tags", "tag", "table", "row", "cell", "column", "size":
+            case "attribute", "tags", "tag", "table", "row", "cell", "column", "size", "p", "bookmark":
                 return children.map { renderInline($0, context: &context) }.joined()
             case "string":
                 return children.map { renderInline($0, context: &context) }.joined()
             case "escape":
                 return children.map(\.plainText).joined()
             default:
-                context.summary.unsupportedNodes += 1
+                context.summary.recordUnsupported("node:\(name)")
                 return children.map { renderInline($0, context: &context) }.joined()
             }
         }
@@ -631,7 +642,7 @@ struct MarkdownRenderer {
             }
             return elementBody(children, context: &context)
         default:
-            context.summary.unsupportedNodes += 1
+            context.summary.recordUnsupported("element:\(kind ?? "unknown")")
             return elementBody(children, context: &context)
         }
     }
