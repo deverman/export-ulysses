@@ -6,6 +6,7 @@ public struct ExportSummary: Sendable, Equatable {
     public var fileAttachments = 0
     public var inlineImages = 0
     public var keywords = 0
+    public var materialSheets = 0
     public var missingMedia = 0
     public var recoveredMedia = 0
     public var unsupportedNodes = 0
@@ -17,6 +18,7 @@ public struct ExportSummary: Sendable, Equatable {
         fileAttachments += other.fileAttachments
         inlineImages += other.inlineImages
         keywords += other.keywords
+        materialSheets += other.materialSheets
         missingMedia += other.missingMedia
         recoveredMedia += other.recoveredMedia
         unsupportedNodes += other.unsupportedNodes
@@ -150,15 +152,30 @@ struct UlyssesBackupReader {
     }
 
     private func groupPath(for sheetURL: URL, root: URL, ignoring ignoredGroups: Set<String>) -> [String] {
-        let rootComponents = root.pathComponents
-        let parentComponents = sheetURL.deletingLastPathComponent().pathComponents
-        let relativeComponents = parentComponents.dropFirst(rootComponents.count)
+        let rootPath = root.standardizedFileURL.path
+        let parentPath = sheetURL.deletingLastPathComponent().standardizedFileURL.path
+        let relativePath: String
+        if parentPath == rootPath {
+            relativePath = ""
+        } else if parentPath.hasPrefix(rootPath + "/") {
+            relativePath = String(parentPath.dropFirst(rootPath.count + 1))
+        } else {
+            relativePath = sheetURL.deletingLastPathComponent().lastPathComponent
+        }
+        let relativeComponents = relativePath.split(separator: "/").map(String.init)
 
         var groups: [String] = []
         var current = root
         for component in relativeComponents {
             current.appendPathComponent(component)
-            if component == "Content" || component.hasSuffix(".ulstoragebackup") || component == "Groups-ulgroup" {
+            if component.hasSuffix(".ulstoragebackup") {
+                if component != "Ubiquitous Library.ulstoragebackup",
+                   let displayName = displayName(forGroupAt: current.appendingPathComponent("Content")) {
+                    groups.append(displayName)
+                }
+                continue
+            }
+            if component == "Content" || component == "Groups-ulgroup" {
                 continue
             }
             if component == "Unfiled-ulgroup" {
@@ -177,7 +194,11 @@ struct UlyssesBackupReader {
 
     private func displayName(forGroupAt url: URL) -> String? {
         let infoURL = url.appendingPathComponent("Info.ulgroup")
-        guard let dictionary = NSDictionary(contentsOf: infoURL) else { return nil }
+        guard let data = try? Data(contentsOf: infoURL),
+              let dictionary = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        else {
+            return nil
+        }
         return dictionary["DisplayName"] as? String
             ?? dictionary["displayName"] as? String
             ?? dictionary["name"] as? String
@@ -189,7 +210,8 @@ struct SheetExporter {
 
     func export(_ source: SheetSource, to outputRoot: URL) throws -> ExportSummary {
         let data = try readDataWithRetry(from: source.contentURL)
-        let sheet = try UlyssesSheetParser(contentURL: source.contentURL).parse(data)
+        var sheet = try UlyssesSheetParser(contentURL: source.contentURL).parse(data)
+        sheet.migrationTags.append(contentsOf: migrationTags(for: source, sheet: sheet))
         let renderer = MarkdownRenderer(mediaResolver: MediaResolver(packageURL: source.packageURL, mediaIndex: mediaIndex))
         let rendered = renderer.render(sheet)
 
@@ -198,6 +220,7 @@ struct SheetExporter {
         summary.sidebarNotes = sheet.sidebarNotes.count
         summary.fileAttachments = sheet.fileAttachmentIDs.count
         summary.keywords = sheet.keywords.count
+        summary.materialSheets = sheet.isMaterial ? 1 : 0
 
         let bundleName = sanitizedFileName(rendered.title.isEmpty ? source.packageURL.deletingPathExtension().lastPathComponent : rendered.title)
         var destinationDirectory = outputRoot
@@ -280,6 +303,17 @@ struct SheetExporter {
         }
         """
     }
+
+    private func migrationTags(for source: SheetSource, sheet: UlyssesSheet) -> [String] {
+        var tags: [String] = []
+        if sheet.isMaterial {
+            tags.append("ulysses/material")
+        }
+        if source.groupPath.first?.trimmingCharacters(in: .whitespacesAndNewlines).localizedCaseInsensitiveCompare("Archive") == .orderedSame {
+            tags.append("ulysses/archive")
+        }
+        return tags
+    }
 }
 
 struct SheetDates: Equatable {
@@ -306,7 +340,13 @@ struct UlyssesSheet: Equatable {
     var sidebarNotes: [[XMLNode]] = []
     var fileAttachmentIDs: [String] = []
     var keywords: [String] = []
+    var settings: [String: String] = [:]
+    var migrationTags: [String] = []
     var unsupportedAttachmentTypes: [String] = []
+
+    var isMaterial: Bool {
+        settings["material"]?.localizedCaseInsensitiveCompare("YES") == .orderedSame
+    }
 }
 
 enum XMLNode: Equatable {
@@ -376,6 +416,10 @@ final class UlyssesSheetParser: NSObject, XMLParserDelegate {
         guard case .element(let name, let attributes, let children) = node else { return }
         if name == "string" {
             parsedSheet.body = children
+        } else if name == "setting" {
+            if let settingName = attributes["name"], let value = attributes["value"] {
+                parsedSheet.settings[settingName] = value
+            }
         } else if name == "attachment" {
             switch attributes["type"] {
             case "note":
@@ -438,6 +482,10 @@ struct MarkdownRenderer {
 
         if !sheet.keywords.isEmpty {
             sections.append("## Ulysses Keywords\n\n" + sheet.keywords.map { "#\(tagSlug($0))" }.joined(separator: " "))
+        }
+
+        if !sheet.migrationTags.isEmpty {
+            sections.append("## Ulysses Migration Tags\n\n" + sheet.migrationTags.map { "#\(tagSlug($0))" }.joined(separator: " "))
         }
 
         if !sheet.unsupportedAttachmentTypes.isEmpty {
@@ -848,7 +896,7 @@ private func sanitizedFileName(_ name: String) -> String {
 }
 
 private func tagSlug(_ value: String) -> String {
-    let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+    let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_/"))
     return value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" }
         .reduce(into: "") { $0.append($1) }
         .replacingOccurrences(of: "--", with: "-")

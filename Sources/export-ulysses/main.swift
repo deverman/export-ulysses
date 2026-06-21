@@ -38,6 +38,7 @@ struct ExportUlysses: AsyncParsableCommand {
         Sidebar file attachments: \(summary.fileAttachments)
         Inline images: \(summary.inlineImages)
         Keywords: \(summary.keywords)
+        Material sheets: \(summary.materialSheets)
         Missing media references: \(summary.missingMedia)
         Recovered media references: \(summary.recoveredMedia)
         Unsupported XML nodes: \(summary.unsupportedNodes)

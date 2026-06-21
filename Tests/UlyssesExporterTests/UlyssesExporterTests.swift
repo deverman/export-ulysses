@@ -38,6 +38,7 @@ final class UlyssesExporterTests: XCTestCase {
         XCTAssertEqual(summary.fileAttachments, 2)
         XCTAssertEqual(summary.inlineImages, 1)
         XCTAssertEqual(summary.keywords, 2)
+        XCTAssertEqual(summary.materialSheets, 0)
         XCTAssertEqual(summary.missingMedia, 0)
         XCTAssertEqual(summary.recoveredMedia, 0)
 
@@ -55,6 +56,51 @@ final class UlyssesExporterTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: bundle.appendingPathComponent("assets/example.abc123.png").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: bundle.appendingPathComponent("assets/attachment.attach456.png").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: bundle.appendingPathComponent("assets/download.file123.pdf").path))
+    }
+
+    func testPreservesProjectArchivePathAndMaterialTag() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let projectContent = input.appendingPathComponent("archive.ulstoragebackup/Content")
+        let main = projectContent.appendingPathComponent("Main-ulgroup")
+        let sheet = main.appendingPathComponent("material.ulysses")
+        try FileManager.default.createDirectory(at: sheet, withIntermediateDirectories: true)
+        try """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <plist version="1.0">
+        <dict>
+          <key>displayName</key>
+          <string>Archive</string>
+        </dict>
+        </plist>
+        """.write(to: projectContent.appendingPathComponent("Info.ulgroup"), atomically: true, encoding: .utf8)
+        try """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <plist version="1.0">
+        <dict>
+          <key>displayName</key>
+          <string>Content</string>
+        </dict>
+        </plist>
+        """.write(to: main.appendingPathComponent("Info.ulgroup"), atomically: true, encoding: .utf8)
+        try contentXML("""
+        <sheet>
+        <string xml:space="preserve">
+        <p><tags><tag kind="heading1"># </tag></tags>Archived Material</p>
+        </string>
+        <setting name="material" value="YES"></setting>
+        </sheet>
+        """).write(to: sheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+
+        let output = root.appendingPathComponent("Output")
+        let summary = try await Exporter().run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+
+        XCTAssertEqual(summary.sheets, 1)
+        XCTAssertEqual(summary.materialSheets, 1)
+        let bundle = output.appendingPathComponent("Archive/Content/Archived Material.textbundle")
+        let markdown = try String(contentsOf: bundle.appendingPathComponent("text.markdown"), encoding: .utf8)
+        XCTAssertTrue(markdown.contains("## Ulysses Migration Tags"))
+        XCTAssertTrue(markdown.contains("#ulysses/material #ulysses/archive"))
     }
 
     func testRecoversMissingSheetMediaFromSameBackup() async throws {
