@@ -39,6 +39,7 @@ struct ExportUlysses: AsyncParsableCommand {
         Inline images: \(summary.inlineImages)
         Keywords: \(summary.keywords)
         Missing media references: \(summary.missingMedia)
+        Recovered media references: \(summary.recoveredMedia)
         Unsupported XML nodes: \(summary.unsupportedNodes)
         """)
 

@@ -7,6 +7,7 @@ public struct ExportSummary: Sendable, Equatable {
     public var inlineImages = 0
     public var keywords = 0
     public var missingMedia = 0
+    public var recoveredMedia = 0
     public var unsupportedNodes = 0
     public var unsupportedDetails: [String: Int] = [:]
 
@@ -17,6 +18,7 @@ public struct ExportSummary: Sendable, Equatable {
         inlineImages += other.inlineImages
         keywords += other.keywords
         missingMedia += other.missingMedia
+        recoveredMedia += other.recoveredMedia
         unsupportedNodes += other.unsupportedNodes
         for (key, value) in other.unsupportedDetails {
             unsupportedDetails[key, default: 0] += value
@@ -57,10 +59,11 @@ public struct Exporter {
             print("Found \(sheets.count) Ulysses sheets.")
         }
 
-        return try await export(sheets, to: outputURL)
+        let mediaIndex = MediaIndex(sheets: sheets)
+        return try await export(sheets, to: outputURL, mediaIndex: mediaIndex)
     }
 
-    private func export(_ sheets: [SheetSource], to outputURL: URL) async throws -> ExportSummary {
+    private func export(_ sheets: [SheetSource], to outputURL: URL, mediaIndex: MediaIndex) async throws -> ExportSummary {
         try await withThrowingTaskGroup(of: ExportSummary.self) { group in
             var nextSheetIndex = 0
 
@@ -69,7 +72,7 @@ public struct Exporter {
                 let sheet = sheets[nextSheetIndex]
                 nextSheetIndex += 1
                 group.addTask {
-                    try SheetExporter().export(sheet, to: outputURL)
+                    try SheetExporter(mediaIndex: mediaIndex).export(sheet, to: outputURL)
                 }
             }
 
@@ -182,10 +185,12 @@ struct UlyssesBackupReader {
 }
 
 struct SheetExporter {
+    let mediaIndex: MediaIndex
+
     func export(_ source: SheetSource, to outputRoot: URL) throws -> ExportSummary {
         let data = try readDataWithRetry(from: source.contentURL)
         let sheet = try UlyssesSheetParser(contentURL: source.contentURL).parse(data)
-        let renderer = MarkdownRenderer(mediaResolver: MediaResolver(packageURL: source.packageURL))
+        let renderer = MarkdownRenderer(mediaResolver: MediaResolver(packageURL: source.packageURL, mediaIndex: mediaIndex))
         let rendered = renderer.render(sheet)
 
         var summary = rendered.summary
@@ -200,16 +205,20 @@ struct SheetExporter {
             destinationDirectory.appendPathComponent(sanitizedFileName(group))
         }
         try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+        let dates = sheetDates(for: source)
 
         let bundleURL = try DestinationAllocator.shared.createBundle(
             at: destinationDirectory.appendingPathComponent(bundleName).appendingPathExtension("textbundle")
         )
 
-        try rendered.markdown.write(to: bundleURL.appendingPathComponent("text.markdown"), atomically: true, encoding: .utf8)
-        try infoJSON(for: source.contentURL).write(to: bundleURL.appendingPathComponent("info.json"), atomically: true, encoding: .utf8)
+        let textURL = bundleURL.appendingPathComponent("text.markdown")
+        let infoURL = bundleURL.appendingPathComponent("info.json")
+        let assetsURL = bundleURL.appendingPathComponent("assets")
+        try rendered.markdown.write(to: textURL, atomically: true, encoding: .utf8)
+        try infoJSON(for: dates).write(to: infoURL, atomically: true, encoding: .utf8)
 
         for media in rendered.media {
-            let destination = bundleURL.appendingPathComponent("assets").appendingPathComponent(media.destinationName)
+            let destination = assetsURL.appendingPathComponent(media.destinationName)
             if let sourceURL = media.sourceURL {
                 if FileManager.default.fileExists(atPath: sourceURL.path) {
                     try FileManager.default.copyItem(at: sourceURL, to: destination)
@@ -219,6 +228,7 @@ struct SheetExporter {
             }
         }
 
+        try apply(dates: dates, to: [bundleURL, assetsURL, textURL, infoURL])
         return summary
     }
 
@@ -237,10 +247,30 @@ struct SheetExporter {
         throw ExportError.contentOpenFailed(url.path, lastError?.localizedDescription ?? "unknown error")
     }
 
-    private func infoJSON(for contentURL: URL) -> String {
-        let values = try? contentURL.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
-        let created = Int((values?.creationDate ?? Date()).timeIntervalSince1970)
-        let modified = Int((values?.contentModificationDate ?? Date()).timeIntervalSince1970)
+    private func sheetDates(for source: SheetSource) -> SheetDates {
+        let packageValues = try? source.packageURL.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
+        let contentValues = try? source.contentURL.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
+        let created = packageValues?.creationDate ?? contentValues?.creationDate ?? Date()
+        let modified = contentValues?.contentModificationDate
+            ?? packageValues?.contentModificationDate
+            ?? contentValues?.creationDate
+            ?? created
+        return SheetDates(created: created, modified: modified)
+    }
+
+    private func apply(dates: SheetDates, to urls: [URL]) throws {
+        let attributes: [FileAttributeKey: Any] = [
+            .creationDate: dates.created,
+            .modificationDate: dates.modified
+        ]
+        for url in urls where FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.setAttributes(attributes, ofItemAtPath: url.path)
+        }
+    }
+
+    private func infoJSON(for dates: SheetDates) -> String {
+        let created = Int(dates.created.timeIntervalSince1970)
+        let modified = Int(dates.modified.timeIntervalSince1970)
         return """
         {
           "version": 2,
@@ -250,6 +280,11 @@ struct SheetExporter {
         }
         """
     }
+}
+
+struct SheetDates: Equatable {
+    let created: Date
+    let modified: Date
 }
 
 final class DestinationAllocator: @unchecked Sendable {
@@ -378,6 +413,7 @@ struct RenderedSheet: Equatable {
 struct ReferencedMedia: Equatable {
     var sourceURL: URL?
     var destinationName: String
+    var recoveredFromGlobalIndex = false
 }
 
 struct MarkdownRenderer {
@@ -428,7 +464,11 @@ struct MarkdownRenderer {
     private func renderFileAttachments(_ ids: [String], context: inout RenderContext) -> String {
         let lines = ids.map { id -> String in
             if let media = context.resolveMedia(id: id) {
-                return "- [\(media.destinationName)](assets/\(media.destinationName))"
+                let path = assetMarkdownPath(for: media.destinationName)
+                if isImageFile(media.destinationName) {
+                    return "- ![\(media.destinationName)](\(path))"
+                }
+                return "- [\(media.destinationName)](\(path))"
             }
             context.summary.missingMedia += 1
             return "- Missing Ulysses file attachment: `\(id)`"
@@ -620,14 +660,14 @@ struct MarkdownRenderer {
             context.summary.inlineImages += 1
             let description = attributeValue("description", in: children) ?? ""
             if let id = attributeValue("image", in: children), let media = context.resolveMedia(id: id) {
-                return "![\(description)](assets/\(media.destinationName))"
+                return "![\(description)](\(assetMarkdownPath(for: media.destinationName)))"
             }
             if let url = attributeValue("URL", in: children), !url.isEmpty {
                 if url.hasPrefix("http://") || url.hasPrefix("https://") {
                     return "![\(description)](\(url))"
                 }
                 if let media = context.resolveMedia(pathOrURL: url) {
-                    return "![\(description)](assets/\(media.destinationName))"
+                    return "![\(description)](\(assetMarkdownPath(for: media.destinationName)))"
                 }
                 context.summary.missingMedia += 1
                 return "![\(description)](\(url))"
@@ -692,15 +732,19 @@ struct RenderContext {
 
     mutating func resolveMedia(id: String) -> ReferencedMedia? {
         guard let source = mediaResolver.mediaFile(matching: id) else { return nil }
-        return recordMedia(sourceURL: source)
+        return recordMedia(source)
     }
 
     mutating func resolveMedia(pathOrURL: String) -> ReferencedMedia? {
         guard let source = mediaResolver.mediaFile(pathOrURL: pathOrURL) else { return nil }
-        return recordMedia(sourceURL: source)
+        return recordMedia(source)
     }
 
-    private mutating func recordMedia(sourceURL: URL) -> ReferencedMedia {
+    private mutating func recordMedia(_ source: ResolvedMedia) -> ReferencedMedia {
+        if source.recoveredFromGlobalIndex {
+            summary.recoveredMedia += 1
+        }
+        let sourceURL = source.url
         let baseName = sourceURL.lastPathComponent
         var destinationName = baseName
         var counter = 1
@@ -711,37 +755,88 @@ struct RenderContext {
             counter += 1
         }
         mediaByDestination.insert(destinationName)
-        let mediaReference = ReferencedMedia(sourceURL: sourceURL, destinationName: destinationName)
+        let mediaReference = ReferencedMedia(
+            sourceURL: sourceURL,
+            destinationName: destinationName,
+            recoveredFromGlobalIndex: source.recoveredFromGlobalIndex
+        )
         media.append(mediaReference)
         return mediaReference
     }
 }
 
+struct ResolvedMedia: Equatable {
+    let url: URL
+    let recoveredFromGlobalIndex: Bool
+}
+
 struct MediaResolver: Equatable {
     let packageURL: URL
+    let mediaIndex: MediaIndex
     private var mediaURL: URL { packageURL.appendingPathComponent("Media") }
 
-    func mediaFile(matching id: String) -> URL? {
+    func mediaFile(matching id: String) -> ResolvedMedia? {
+        if let local = localMediaFile(matching: id) {
+            return ResolvedMedia(url: local, recoveredFromGlobalIndex: false)
+        }
+        guard let fallback = mediaIndex.mediaFile(matching: id) else { return nil }
+        return ResolvedMedia(url: fallback, recoveredFromGlobalIndex: true)
+    }
+
+    func mediaFile(pathOrURL: String) -> ResolvedMedia? {
+        let decoded = pathOrURL.removingPercentEncoding ?? pathOrURL
+        if decoded.hasPrefix("file://"), let url = URL(string: decoded), FileManager.default.fileExists(atPath: url.path) {
+            return ResolvedMedia(url: url, recoveredFromGlobalIndex: false)
+        }
+        let local = mediaURL.appendingPathComponent(decoded)
+        if FileManager.default.fileExists(atPath: local.path) {
+            return ResolvedMedia(url: local, recoveredFromGlobalIndex: false)
+        }
+        let packageLocal = packageURL.appendingPathComponent(decoded)
+        if FileManager.default.fileExists(atPath: packageLocal.path) {
+            return ResolvedMedia(url: packageLocal, recoveredFromGlobalIndex: false)
+        }
+        return nil
+    }
+
+    private func localMediaFile(matching id: String) -> URL? {
         guard let files = try? FileManager.default.contentsOfDirectory(at: mediaURL, includingPropertiesForKeys: nil) else {
             return nil
         }
         return files.first { $0.lastPathComponent.contains(".\(id).") || $0.deletingPathExtension().lastPathComponent.hasSuffix(".\(id)") }
     }
+}
 
-    func mediaFile(pathOrURL: String) -> URL? {
-        let decoded = pathOrURL.removingPercentEncoding ?? pathOrURL
-        if decoded.hasPrefix("file://"), let url = URL(string: decoded), FileManager.default.fileExists(atPath: url.path) {
-            return url
+struct MediaIndex: Sendable, Equatable {
+    let filesByID: [String: [URL]]
+
+    init(sheets: [SheetSource]) {
+        var filesByID: [String: [URL]] = [:]
+        for sheet in sheets {
+            let mediaURL = sheet.packageURL.appendingPathComponent("Media")
+            guard let files = try? FileManager.default.contentsOfDirectory(at: mediaURL, includingPropertiesForKeys: nil) else {
+                continue
+            }
+            for file in files {
+                guard let id = Self.mediaID(from: file.lastPathComponent) else { continue }
+                filesByID[id, default: []].append(file)
+            }
         }
-        let local = mediaURL.appendingPathComponent(decoded)
-        if FileManager.default.fileExists(atPath: local.path) {
-            return local
+        self.filesByID = filesByID.mapValues { files in
+            files.sorted { $0.path < $1.path }
         }
-        let packageLocal = packageURL.appendingPathComponent(decoded)
-        if FileManager.default.fileExists(atPath: packageLocal.path) {
-            return packageLocal
+    }
+
+    func mediaFile(matching id: String) -> URL? {
+        filesByID[id]?.first
+    }
+
+    private static func mediaID(from fileName: String) -> String? {
+        let stem = (fileName as NSString).deletingPathExtension
+        guard let candidate = stem.split(separator: ".").last.map(String.init), !candidate.isEmpty else {
+            return nil
         }
-        return nil
+        return candidate
     }
 }
 
@@ -758,6 +853,21 @@ private func tagSlug(_ value: String) -> String {
         .reduce(into: "") { $0.append($1) }
         .replacingOccurrences(of: "--", with: "-")
         .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+}
+
+private func assetMarkdownPath(for destinationName: String) -> String {
+    let allowed = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "#%?[]"))
+    let escaped = destinationName.addingPercentEncoding(withAllowedCharacters: allowed) ?? destinationName
+    return "assets/\(escaped)"
+}
+
+private func isImageFile(_ fileName: String) -> Bool {
+    switch (fileName as NSString).pathExtension.lowercased() {
+    case "apng", "avif", "bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp":
+        return true
+    default:
+        return false
+    }
 }
 
 private func availableDestination(for destination: URL) -> URL {
