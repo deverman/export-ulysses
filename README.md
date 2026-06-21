@@ -34,7 +34,7 @@ This tool targets Ulysses 40 on macOS 26 Tahoe with Swift 6.3.2 or newer. It rea
      --jobs 2
    ```
 
-Then add `FSNotesImport` as an FSNotes folder. The export writes a visible `Ulysses Export Report.textbundle` and a privacy-safe `ulysses-export-report.json` support report.
+Then add `FSNotesImport` as an FSNotes folder. The export writes a visible `Ulysses Export Report.textbundle` and a privacy-safe `.export-ulysses/ulysses-export-report.json` support report in a hidden folder so FSNotes does not show JSON as a note.
 
 ## Commands And Options
 
@@ -64,11 +64,11 @@ Options:
 | Inline images | Copied to `assets/` and linked with relative Markdown paths |
 | Keywords | Written as visible FSNotes-searchable hashtags |
 | Material sheets | Tagged `#ulysses/material` |
-| Glued sheets | Tagged `#ulysses/glued` and listed in `Ulysses Sheet Order` notes |
+| Glued sheets | Tagged `#ulysses/glued` and listed in distinct `Ulysses Sheet Order: Group / Path` notes |
 | Archive, Templates, Trash | Preserved as folders and tagged `#ulysses/archive`, `#ulysses/template`, or `#ulysses/trash` |
 | Favorites | Tagged `#ulysses/favorite` when Ulysses exposes favorite metadata in sheet XML |
-| Group icons, colors, goals, activity counts | Preserved in `Ulysses Metadata.textbundle` notes |
-| Ulysses sheet order | Preserved in `Ulysses Sheet Order.textbundle` notes |
+| Group icons, colors, goals, activity counts | Preserved in distinct `Ulysses Metadata: Group / Path` notes |
+| Ulysses sheet order | Preserved in `Ulysses Sheet Order: Group / Path` notes using FSNotes `[[wikilinks]]` |
 | Creation and modification dates | Written to TextBundle `info.json` and applied to bundle files |
 | FSNotes pins and folder sort settings | Not written; these are FSNotes app-internal settings, not portable TextBundle metadata |
 
@@ -93,8 +93,8 @@ Example.textbundle/
 - If the backup path cannot be read, grant Full Disk Access to Terminal, iTerm, or the app running this command.
 - If FSNotes preview does not show an image, check whether the image appears in `assets/` and whether the Markdown link starts with `assets/`.
 - Duplicate Ulysses titles are preserved as separate TextBundles with numeric suffixes. The report counts how many were renamed.
-- Missing media references are preserved as report entries without note contents. Many stale mobile `file://` image references cannot be recovered from a backup.
-- The support report intentionally excludes note text. Share `ulysses-export-report.json` when filing a bug, not your Ulysses backup.
+- Missing media references are preserved as report entries with the affected note title and reference. Bare filenames usually mean an imported/local image was never stored in the Ulysses package. Mobile `file://` references usually point to transient iOS app storage and cannot be recovered from a Ulysses backup.
+- The support report intentionally excludes note text. Share `.export-ulysses/ulysses-export-report.json` when filing a bug, not your Ulysses backup.
 
 ## Real Library Validation
 
@@ -114,7 +114,7 @@ Recent dry-run validation found:
 - 20 material sheets
 - 206 glued sheets
 - 137 sheet order notes
-- 242 group metadata notes
+- about 40-50 group metadata notes for groups with visible Ulysses-only metadata such as icons, colors, goals, activity, or archive/template/trash roles
 - 30 missing media references
 - 0 unsupported XML nodes
 

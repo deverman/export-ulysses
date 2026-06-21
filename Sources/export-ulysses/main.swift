@@ -76,7 +76,7 @@ struct ExportUlysses: AsyncParsableCommand {
         let summary = try await exporter
             .run(input: input, output: output, keepGroups: keepGroups, ignoring: ignore, commandLine: CommandLine.arguments)
         printSummary(summary)
-        print("Wrote Ulysses Export Report.textbundle and ulysses-export-report.json.")
+        print("Wrote Ulysses Export Report.textbundle and hidden .export-ulysses/ulysses-export-report.json.")
     }
 
     private func printSummary(_ summary: ExportSummary) {

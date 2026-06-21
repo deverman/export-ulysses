@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Do not attach your Ulysses backup or exported note contents. Run `--doctor --analyze` or include `ulysses-export-report.json`; it is designed to avoid note text.
+        Do not attach your Ulysses backup or exported note contents. Run `--doctor --analyze` or include `.export-ulysses/ulysses-export-report.json`; it is designed to avoid note text.
   - type: input
     id: versions
     attributes:
@@ -28,7 +28,7 @@ body:
     id: report
     attributes:
       label: Support report
-      description: Paste `ulysses-export-report.json` or the console output from `--doctor --analyze`.
+      description: Paste `.export-ulysses/ulysses-export-report.json` or the console output from `--doctor --analyze`.
       render: json
     validations:
       required: true
@@ -51,4 +51,3 @@ body:
     attributes:
       label: Minimal fixture
       description: If possible, describe or attach a small synthetic Ulysses/TextBundle fixture that does not contain private writing.
-

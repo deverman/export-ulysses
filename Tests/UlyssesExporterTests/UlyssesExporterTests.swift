@@ -135,14 +135,15 @@ final class UlyssesExporterTests: XCTestCase {
 
         let folder = output.appendingPathComponent("Project/Content/Ordered")
         let orderMarkdown = try String(
-            contentsOf: folder.appendingPathComponent("Ulysses Sheet Order.textbundle/text.markdown"),
+            contentsOf: folder.appendingPathComponent("Ulysses Sheet Order- Project - Content - Ordered.textbundle/text.markdown"),
             encoding: .utf8
         )
+        XCTAssertTrue(orderMarkdown.contains("# Ulysses Sheet Order: Project / Content / Ordered"))
         XCTAssertTrue(orderMarkdown.contains("#ulysses/order-index #ulysses/glued"))
-        XCTAssertTrue(orderMarkdown.contains("1. [Second](Second.textbundle)"))
+        XCTAssertTrue(orderMarkdown.contains("1. [[Second]] (`Second.textbundle`)"))
         XCTAssertTrue(orderMarkdown.contains("2. Glued sheets"))
-        XCTAssertTrue(orderMarkdown.contains("- [First](First.textbundle)"))
-        XCTAssertTrue(orderMarkdown.contains("- [Third](Third.textbundle)"))
+        XCTAssertTrue(orderMarkdown.contains("- [[First]] (`First.textbundle`)"))
+        XCTAssertTrue(orderMarkdown.contains("- [[Third]] (`Third.textbundle`)"))
         XCTAssertLessThan(orderMarkdown.range(of: "[Second]")!.lowerBound, orderMarkdown.range(of: "Glued sheets")!.lowerBound)
 
         let firstMarkdown = try String(contentsOf: folder.appendingPathComponent("First.textbundle/text.markdown"), encoding: .utf8)
@@ -268,9 +269,10 @@ final class UlyssesExporterTests: XCTestCase {
         XCTAssertTrue(trashMarkdown.contains("#ulysses/trash"))
 
         let metadataMarkdown = try String(
-            contentsOf: output.appendingPathComponent("Archive/Content/Templates/Ulysses Metadata.textbundle/text.markdown"),
+            contentsOf: output.appendingPathComponent("Archive/Content/Templates/Ulysses Metadata- Archive - Content - Templates.textbundle/text.markdown"),
             encoding: .utf8
         )
+        XCTAssertTrue(metadataMarkdown.contains("# Ulysses Metadata: Archive / Content / Templates"))
         XCTAssertTrue(metadataMarkdown.contains("#ulysses/group-metadata #ulysses/template"))
         XCTAssertTrue(metadataMarkdown.contains("- Ulysses icon: Material"))
         XCTAssertTrue(metadataMarkdown.contains("- Ulysses color: gray"))
@@ -282,7 +284,7 @@ final class UlyssesExporterTests: XCTestCase {
         XCTAssertTrue(reportMarkdown.contains("- Template sheets: 1"))
         XCTAssertTrue(reportMarkdown.contains("- Trash sheets: 1"))
 
-        let reportData = try Data(contentsOf: output.appendingPathComponent("ulysses-export-report.json"))
+        let reportData = try Data(contentsOf: output.appendingPathComponent(".export-ulysses/ulysses-export-report.json"))
         let report = try JSONSerialization.jsonObject(with: reportData) as? [String: Any]
         let counts = try XCTUnwrap(report?["counts"] as? [String: Any])
         XCTAssertEqual(counts["sheets"] as? Int, 2)

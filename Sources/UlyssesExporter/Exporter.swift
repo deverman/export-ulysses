@@ -58,6 +58,15 @@ public struct ExportSummary: Sendable, Equatable, Codable {
         missingMedia += 1
         missingMediaDetails[key, default: 0] += 1
     }
+
+    public mutating func annotateMissingMedia(sourceTitle: String) {
+        guard !missingMediaDetails.isEmpty else { return }
+        let title = sourceTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        missingMediaDetails = missingMediaDetails.reduce(into: [:]) { result, pair in
+            result["\(title) -> \(pair.key)", default: 0] += pair.value
+        }
+    }
 }
 
 public struct ExportAnalysis: Sendable, Equatable, Codable {
@@ -338,11 +347,9 @@ public struct UlyssesGroupMetadata: Sendable, Equatable {
     public let activitySessionCount: Int
     public let rawKeys: [String]
 
-    public var hasPortableMetadata: Bool {
+    public var hasUserVisibleMetadata: Bool {
         userIconName != nil
             || userTintColor != nil
-            || !childOrder.isEmpty
-            || !sheetClusters.isEmpty
             || !countingGoal.isEmpty
             || activitySessionCount > 0
     }
@@ -518,6 +525,7 @@ struct SheetExporter {
         summary.templateSheets = prepared.roles.contains(.template) ? 1 : 0
         summary.trashSheets = prepared.roles.contains(.trash) ? 1 : 0
         summary.favoriteSheets = prepared.sheet.isFavorite ? 1 : 0
+        summary.annotateMissingMedia(sourceTitle: prepared.noteTitle)
 
         var destinationDirectory = outputRoot
         for group in source.groupPath {
@@ -540,7 +548,7 @@ struct SheetExporter {
                 sourcePackageName: source.packageURL.lastPathComponent,
                 sourceGroupURL: source.groupURL,
                 groupPath: source.groupPath,
-                title: prepared.rendered.title.isEmpty ? prepared.bundleName : prepared.rendered.title,
+                title: prepared.noteTitle,
                 destinationName: writeResult.bundleURL.lastPathComponent,
                 dates: prepared.dates
             )
@@ -560,6 +568,7 @@ struct SheetExporter {
         summary.templateSheets = prepared.roles.contains(.template) ? 1 : 0
         summary.trashSheets = prepared.roles.contains(.trash) ? 1 : 0
         summary.favoriteSheets = prepared.sheet.isFavorite ? 1 : 0
+        summary.annotateMissingMedia(sourceTitle: prepared.noteTitle)
 
         return SheetExportResult(
             summary: summary,
@@ -567,7 +576,7 @@ struct SheetExporter {
                 sourcePackageName: source.packageURL.lastPathComponent,
                 sourceGroupURL: source.groupURL,
                 groupPath: source.groupPath,
-                title: prepared.rendered.title.isEmpty ? prepared.bundleName : prepared.rendered.title,
+                title: prepared.noteTitle,
                 destinationName: prepared.bundleName + ".textbundle",
                 dates: prepared.dates
             )
@@ -655,6 +664,10 @@ struct PreparedSheetExport: Equatable {
     let dates: SheetDates
     let roles: Set<UlyssesRole>
     let isGlued: Bool
+
+    var noteTitle: String {
+        rendered.title.isEmpty ? bundleName : rendered.title
+    }
 }
 
 enum UlyssesRole: String, Sendable, Comparable {
@@ -770,7 +783,7 @@ struct SheetOrderNoteWriter {
     func writeOrderNotes(for entries: [SheetOrderEntry]) throws -> Int {
         try orderNotePlans(for: entries).reduce(0) { written, plan in
             _ = try TextBundleWriter().writeBundle(
-                named: "Ulysses Sheet Order",
+                named: plan.title,
                 markdown: plan.markdown,
                 in: plan.destinationDirectory,
                 dates: plan.dates
@@ -808,7 +821,8 @@ struct SheetOrderNoteWriter {
             let dates = datesForOrderNote(entries: groupEntries)
             plans.append(OrderNotePlan(
                 destinationDirectory: destinationDirectory,
-                markdown: markdown(for: orderedClusters, hasGluedCluster: hasGluedCluster),
+                title: orderNoteTitle(for: first.groupPath),
+                markdown: markdown(for: orderedClusters, groupPath: first.groupPath, hasGluedCluster: hasGluedCluster),
                 dates: dates
             ))
         }
@@ -840,11 +854,13 @@ struct SheetOrderNoteWriter {
         return orderedClusters
     }
 
-    private func markdown(for clusters: [[SheetOrderEntry]], hasGluedCluster: Bool) -> String {
+    private func markdown(for clusters: [[SheetOrderEntry]], groupPath: [String], hasGluedCluster: Bool) -> String {
         var lines = [
-            "# Ulysses Sheet Order",
+            "# \(orderNoteTitle(for: groupPath))",
             "",
             hasGluedCluster ? "#ulysses/order-index #ulysses/glued" : "#ulysses/order-index",
+            "",
+            "Folder: \(groupPath.joined(separator: " / "))",
             "",
             "## Sheets"
         ]
@@ -866,7 +882,15 @@ struct SheetOrderNoteWriter {
     }
 
     private func link(for entry: SheetOrderEntry) -> String {
-        "[\(escapeMarkdownLinkText(entry.title))](\(markdownPath(for: entry.destinationName)))"
+        let wikiTitle = entry.title
+            .replacingOccurrences(of: "[[", with: "[")
+            .replacingOccurrences(of: "]]", with: "]")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return "[[\(wikiTitle)]] (`\(entry.destinationName)`)"
+    }
+
+    private func orderNoteTitle(for groupPath: [String]) -> String {
+        "Ulysses Sheet Order: \(groupPath.joined(separator: " / "))"
     }
 
     private func datesForOrderNote(entries: [SheetOrderEntry]) -> SheetDates {
@@ -878,6 +902,7 @@ struct SheetOrderNoteWriter {
 
 struct OrderNotePlan: Equatable {
     let destinationDirectory: URL
+    let title: String
     let markdown: String
     let dates: SheetDates
 }
@@ -950,7 +975,7 @@ struct GroupMetadataNoteWriter {
     func writeMetadataNotes(for groups: [GroupSource]) throws -> Int {
         try metadataNotePlans(for: groups).reduce(0) { written, plan in
             _ = try TextBundleWriter().writeBundle(
-                named: "Ulysses Metadata",
+                named: plan.title,
                 markdown: plan.markdown,
                 in: plan.destinationDirectory,
                 dates: plan.dates
@@ -966,14 +991,16 @@ struct GroupMetadataNoteWriter {
     private func metadataNotePlans(for groups: [GroupSource]) -> [MetadataNotePlan] {
         groups.compactMap { group in
             let roles = Set(group.groupPath.suffix(1).compactMap(UlyssesRole.init(groupName:)))
-            guard group.metadata.hasPortableMetadata || !roles.isEmpty else { return nil }
+            guard group.metadata.hasUserVisibleMetadata || !roles.isEmpty else { return nil }
             var destinationDirectory = outputURL
             for component in group.groupPath {
                 destinationDirectory.appendPathComponent(sanitizedFileName(component))
             }
             let dates = groupDates(for: group)
+            let title = metadataTitle(for: group)
             return MetadataNotePlan(
                 destinationDirectory: destinationDirectory,
+                title: title,
                 markdown: markdown(for: group, roles: roles),
                 dates: dates
             )
@@ -982,15 +1009,14 @@ struct GroupMetadataNoteWriter {
 
     private func markdown(for group: GroupSource, roles: Set<UlyssesRole>) -> String {
         var lines = [
-            "# Ulysses Metadata",
+            "# \(metadataTitle(for: group))",
             "",
             metadataTags(for: roles).joined(separator: " "),
             "",
             "## Group",
             "",
             "- Display name: \(group.metadata.displayName ?? group.groupPath.last ?? "Untitled")",
-            "- FSNotes path: \(group.groupPath.joined(separator: " / "))",
-            "- Ulysses relative path: `\(group.relativePath)`"
+            "- FSNotes folder: \(group.groupPath.joined(separator: " / "))"
         ]
 
         if let icon = group.metadata.userIconName {
@@ -1029,10 +1055,11 @@ struct GroupMetadataNoteWriter {
             }
         }
         lines.append("")
-        lines.append("## Raw Metadata Keys")
-        lines.append(group.metadata.rawKeys.map { "- `\($0)`" }.joined(separator: "\n"))
-        lines.append("")
         return lines.joined(separator: "\n")
+    }
+
+    private func metadataTitle(for group: GroupSource) -> String {
+        "Ulysses Metadata: \(group.groupPath.joined(separator: " / "))"
     }
 
     private func metadataTags(for roles: Set<UlyssesRole>) -> [String] {
@@ -1054,6 +1081,7 @@ struct GroupMetadataNoteWriter {
 
 struct MetadataNotePlan: Equatable {
     let destinationDirectory: URL
+    let title: String
     let markdown: String
     let dates: SheetDates
 }
@@ -1069,8 +1097,10 @@ struct ExportReportWriter {
             in: outputURL,
             dates: dates
         )
+        let supportDirectory = outputURL.appendingPathComponent(".export-ulysses", isDirectory: true)
+        try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
         try supportJSON(summary: summary, snapshot: snapshot, commandLine: commandLine)
-            .write(to: outputURL.appendingPathComponent("ulysses-export-report.json"), atomically: true, encoding: .utf8)
+            .write(to: supportDirectory.appendingPathComponent("ulysses-export-report.json"), atomically: true, encoding: .utf8)
     }
 
     func reportMarkdown(summary: ExportSummary, snapshot: UlyssesLibrarySnapshot, commandLine: [String]) -> String {
@@ -1110,13 +1140,23 @@ struct ExportReportWriter {
             "",
             "- Ulysses inspector/sidebar UI placement",
             "- Ulysses group icons, colors, goals, and activity tracking as native FSNotes folder settings",
-            "- Ulysses favorites as native FSNotes pins"
+            "- Ulysses favorites as native FSNotes pins",
+            "",
+            "## Support File",
+            "",
+            "A privacy-safe JSON support report was written to `.export-ulysses/ulysses-export-report.json`. FSNotes should not show that hidden folder in the note list."
         ]
 
         if !summary.missingMediaDetails.isEmpty {
             lines.append("")
             lines.append("## Missing Media References")
             lines.append(contentsOf: summary.missingMediaDetails.sorted(by: { $0.key < $1.key }).map { "- `\($0.key)`: \($0.value)" })
+            lines.append("")
+            lines.append("## Missing Media RCA")
+            lines.append("")
+            lines.append("- Bare filenames such as `boats.jpg` mean Ulysses XML referenced a relative image path, but no matching file was present in that sheet package, its `Media` folder, or the backup-wide media index.")
+            lines.append("- `file:///var/mobile/...` references point outside the Ulysses backup, usually to transient iOS app storage such as Messages attachments. These cannot be recovered from the backup unless the original file still exists somewhere else.")
+            lines.append("- The affected note title is included before `->` so you can decide whether the note matters or whether it is an old imported/demo sheet.")
         }
 
         if !summary.unsupportedDetails.isEmpty {
@@ -1797,13 +1837,6 @@ private func assetMarkdownPath(for destinationName: String) -> String {
 private func markdownPath(for fileName: String) -> String {
     let allowed = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "#%?[]"))
     return fileName.addingPercentEncoding(withAllowedCharacters: allowed) ?? fileName
-}
-
-private func escapeMarkdownLinkText(_ value: String) -> String {
-    value
-        .replacingOccurrences(of: "\\", with: "\\\\")
-        .replacingOccurrences(of: "[", with: "\\[")
-        .replacingOccurrences(of: "]", with: "\\]")
 }
 
 private func isImageFile(_ fileName: String) -> Bool {
