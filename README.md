@@ -1,48 +1,80 @@
 # export-ulysses
 
-Exports a Ulysses backup into FSNotes-readable TextBundle notes.
+Exports a Ulysses 40 backup into FSNotes-readable TextBundle notes.
 
-This tool targets Ulysses 40 on macOS 26 Tahoe. It reads Ulysses backup packages (`.ulbackup`) instead of only copying the iCloud Drive TextBundle folder, because the backup `Content.xml` files include Ulysses inspector/sidebar data such as notes, file attachments, keywords, comments, and media references.
+This tool targets Ulysses 40 on macOS 26 Tahoe with Swift 6.3.2 or newer. It reads Ulysses backup packages (`.ulbackup`) instead of copying the iCloud Drive folder, because the backup `Content.xml` and `Info.ulgroup` files include Ulysses sidebar notes, comments, annotations, attachments, keywords, sheet order, glued sheets, material sheets, goals, group icons, and other migration metadata.
 
-## Installing
+## Migrate In 3 Steps
 
-You need Swift 6.3.2 or newer.
+1. Build or run the tool:
 
-```sh
-git clone git@github.com:deverman/export-ulysses.git
-cd export-ulysses
-swift run export-ulysses --help
-```
+   ```sh
+   git clone git@github.com:deverman/export-ulysses.git
+   cd export-ulysses
+   swift run export-ulysses --help
+   ```
 
-For repeated use, build a release binary:
+2. Check the backup before writing anything:
 
-```sh
-swift build -c release
-```
+   ```sh
+   swift run export-ulysses \
+     "$HOME/Library/Group Containers/X5AZV975AG.com.soulmen.shared/Ulysses/Backups/Latest Backup.ulbackup" \
+     --keep-groups \
+     --doctor \
+     --analyze
+   ```
 
-## Usage
+3. Export to a new FSNotes folder:
 
-```sh
-swift run export-ulysses \
-  "$HOME/Library/Group Containers/X5AZV975AG.com.soulmen.shared/Ulysses/Backups/Latest Backup.ulbackup" \
-  ./FSNotesImport \
-  --keep-groups \
-  --jobs 4
-```
+   ```sh
+   swift run export-ulysses \
+     "$HOME/Library/Group Containers/X5AZV975AG.com.soulmen.shared/Ulysses/Backups/Latest Backup.ulbackup" \
+     ./FSNotesImport \
+     --keep-groups \
+     --jobs 2
+   ```
+
+Then add `FSNotesImport` as an FSNotes folder. The export writes a visible `Ulysses Export Report.textbundle` and a privacy-safe `ulysses-export-report.json` support report.
+
+## Commands And Options
 
 Arguments:
 
 - `input`: a Ulysses `.ulbackup` folder, usually `Latest Backup.ulbackup`
-- `output`: the folder where FSNotes TextBundles should be written
+- `output`: the folder where FSNotes TextBundles should be written; required for export, optional for `--analyze`
 
 Options:
 
 - `--keep-groups`: preserve Ulysses group folders in the output
 - `--ignore <group>`: skip matching Ulysses groups
-- `--jobs <count>`: convert sheets concurrently
+- `--jobs <count>`: convert sheets concurrently; default is `2`
+- `--analyze`: scan the backup and print a migration report without writing TextBundles
+- `--doctor`: run preflight checks for the backup path, output folder, markup, and asset references
 - `--verbose`: print additional discovery/export progress
 
-## What Is Exported
+## Fidelity Matrix
+
+| Ulysses data | FSNotes export behavior |
+| --- | --- |
+| Sheet text | Preserved in `text.markdown` |
+| Headings, lists, links, emphasis, strong, code, footnotes, highlights, deletions | Converted to Markdown where Markdown can represent them |
+| Comments and annotations | Preserved visibly in Markdown comments or inline annotation text |
+| Sidebar notes | Preserved in `## Ulysses Sidebar Notes` |
+| Sidebar file attachments | Copied to `assets/` and linked from `## Ulysses Attachments` |
+| Inline images | Copied to `assets/` and linked with relative Markdown paths |
+| Keywords | Written as visible FSNotes-searchable hashtags |
+| Material sheets | Tagged `#ulysses/material` |
+| Glued sheets | Tagged `#ulysses/glued` and listed in `Ulysses Sheet Order` notes |
+| Archive, Templates, Trash | Preserved as folders and tagged `#ulysses/archive`, `#ulysses/template`, or `#ulysses/trash` |
+| Favorites | Tagged `#ulysses/favorite` when Ulysses exposes favorite metadata in sheet XML |
+| Group icons, colors, goals, activity counts | Preserved in `Ulysses Metadata.textbundle` notes |
+| Ulysses sheet order | Preserved in `Ulysses Sheet Order.textbundle` notes |
+| Creation and modification dates | Written to TextBundle `info.json` and applied to bundle files |
+| FSNotes pins and folder sort settings | Not written; these are FSNotes app-internal settings, not portable TextBundle metadata |
+
+Ulysses-only data that FSNotes cannot model directly is made visible in Markdown instead of hidden in custom JSON.
+
+## Output Shape
 
 Each Ulysses sheet becomes one FSNotes-readable `.textbundle`:
 
@@ -53,26 +85,16 @@ Example.textbundle/
   assets/
 ```
 
-The exporter preserves:
+`info.json` follows TextBundle v2 and includes FSNotes-friendly fields such as `flatExtension`, `created`, and `modified`.
 
-- Main sheet text
-- Headings, lists, links, emphasis, strong text, inline code, comments, footnotes, highlights, and deleted text where Markdown can represent them
-- Inline images and image descriptions
-- Ulysses sidebar notes, written into a visible `## Ulysses Sidebar Notes` section
-- Ulysses sidebar file attachments, copied to `assets/` and linked from `## Ulysses Attachments`
-- Ulysses keywords, written into `## Ulysses Keywords`
-- Ulysses tables, converted to Markdown tables
-- Group hierarchy when `--keep-groups` is used
-- FSNotes-compatible TextBundle `info.json`
+## Troubleshooting
 
-Ulysses-only data that FSNotes cannot model directly is made visible in Markdown instead of hidden in custom JSON. FSNotes currently decodes only a small TextBundle metadata shape, so sidebar notes and keywords are intentionally rendered into the note body where FSNotes can display and search them.
-
-## Known Degradations
-
-- Ulysses inspector/sidebar placement is not preserved as UI; the data is preserved as visible Markdown sections.
-- Ulysses image alignment and sizing hints are flattened to normal Markdown image links.
-- Missing or stale media references are reported as `Missing media references`.
-- Unsupported XML nodes are counted in the export summary so you can see whether additional Ulysses markup needs a converter.
+- Run `--doctor --analyze` first. It does not write notes and reports missing assets, unsupported XML nodes, duplicate output titles, archive/template/trash counts, and Ulysses metadata keys.
+- If the backup path cannot be read, grant Full Disk Access to Terminal, iTerm, or the app running this command.
+- If FSNotes preview does not show an image, check whether the image appears in `assets/` and whether the Markdown link starts with `assets/`.
+- Duplicate Ulysses titles are preserved as separate TextBundles with numeric suffixes. The report counts how many were renamed.
+- Missing media references are preserved as report entries without note contents. Many stale mobile `file://` image references cannot be recovered from a backup.
+- The support report intentionally excludes note text. Share `ulysses-export-report.json` when filing a bug, not your Ulysses backup.
 
 ## Real Library Validation
 
@@ -82,13 +104,22 @@ Validated against:
 ~/Library/Group Containers/X5AZV975AG.com.soulmen.shared/Ulysses/Backups/Latest Backup.ulbackup
 ```
 
-The validation run exported:
+Recent dry-run validation found:
 
 - 2,631 sheets
 - 265 sidebar notes
-- 56 sidebar file attachments
+- 55 sidebar file attachments
 - 597 inline images
 - 466 keywords
-- 570 copied asset files
+- 20 material sheets
+- 206 glued sheets
+- 137 sheet order notes
+- 242 group metadata notes
+- 30 missing media references
+- 0 unsupported XML nodes
 
-Run the export into a temporary folder first, then point FSNotes at the resulting folder once the report looks right.
+## Dependency Notes
+
+The exporter intentionally keeps the Ulysses sheet parser on Foundation `XMLParser`. Ulysses sheet XML is ordered mixed content, so a streaming parser is a better fit than a generic Codable XML mapping layer for this version.
+
+TextBundle writing is implemented locally and covered by tests. Shiny Frog's TextBundle framework is mature but not SwiftPM-native; `mcritz/TextBundle` is SwiftPM-native but does not cover the FSNotes metadata shape this exporter writes.

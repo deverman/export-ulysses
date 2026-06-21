@@ -1,0 +1,54 @@
+name: Bug report
+description: Report an export, FSNotes import, asset, or metadata problem.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach your Ulysses backup or exported note contents. Run `--doctor --analyze` or include `ulysses-export-report.json`; it is designed to avoid note text.
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Ulysses, FSNotes, macOS, Swift, and export-ulysses commit or release.
+      placeholder: "Ulysses 40, FSNotes 7.2.1, macOS 26, Swift 6.3.2, export-ulysses ..."
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: Paste the command you ran. Replace private path segments with $HOME or <redacted>.
+      render: sh
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Support report
+      description: Paste `ulysses-export-report.json` or the console output from `--doctor --analyze`.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to appear in FSNotes?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: minimal
+    attributes:
+      label: Minimal fixture
+      description: If possible, describe or attach a small synthetic Ulysses/TextBundle fixture that does not contain private writing.
+

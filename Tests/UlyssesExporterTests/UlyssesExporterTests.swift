@@ -211,6 +211,129 @@ final class UlyssesExporterTests: XCTestCase {
         XCTAssertTrue(markdown.contains("![]()"))
     }
 
+    func testWritesReportMetadataNotesAndFSNotesInfoJSON() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let projectContent = input.appendingPathComponent("archive.ulstoragebackup/Content")
+        let main = projectContent.appendingPathComponent("Main-ulgroup")
+        let templates = main.appendingPathComponent("templates-ulgroup")
+        let templateSheet = templates.appendingPathComponent("template.ulysses")
+        let trashSheet = input.appendingPathComponent("Ubiquitous Library.ulstoragebackup/Content/Trash-ultrash/trash.ulysses")
+        try FileManager.default.createDirectory(at: templateSheet, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: trashSheet, withIntermediateDirectories: true)
+        try writeInfo(displayName: "Archive", to: projectContent.appendingPathComponent("Info.ulgroup"))
+        try writeInfo(displayName: "Content", to: main.appendingPathComponent("Info.ulgroup"))
+        try writeInfo(
+            displayName: "Templates",
+            sheetClusters: [["template.ulysses"]],
+            childOrder: ["template.ulysses"],
+            icon: "Material",
+            tint: "gray",
+            countingGoal: ["counterIdentifier": "words", "targetResult": "100", "type": "daily"],
+            to: templates.appendingPathComponent("Info.ulgroup")
+        )
+        try contentXML("""
+        <sheet>
+        <string xml:space="preserve">
+        <p><tags><tag kind="heading1"># </tag></tags>Reusable Draft</p>
+        </string>
+        <setting name="favorite" value="YES"></setting>
+        </sheet>
+        """).write(to: templateSheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+        try titledSheet("Deleted Draft").write(to: trashSheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+
+        let output = root.appendingPathComponent("Output")
+        let summary = try await Exporter().run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+
+        XCTAssertEqual(summary.sheets, 2)
+        XCTAssertEqual(summary.archiveSheets, 1)
+        XCTAssertEqual(summary.templateSheets, 1)
+        XCTAssertEqual(summary.trashSheets, 1)
+        XCTAssertEqual(summary.favoriteSheets, 1)
+        XCTAssertEqual(summary.reportNotes, 1)
+        XCTAssertEqual(summary.metadataNotes, 2)
+
+        let templateMarkdown = try String(
+            contentsOf: output.appendingPathComponent("Archive/Content/Templates/Reusable Draft.textbundle/text.markdown"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(templateMarkdown.contains("#ulysses/favorite"))
+        XCTAssertTrue(templateMarkdown.contains("#ulysses/archive"))
+        XCTAssertTrue(templateMarkdown.contains("#ulysses/template"))
+
+        let trashMarkdown = try String(
+            contentsOf: output.appendingPathComponent("Trash/Deleted Draft.textbundle/text.markdown"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(trashMarkdown.contains("#ulysses/trash"))
+
+        let metadataMarkdown = try String(
+            contentsOf: output.appendingPathComponent("Archive/Content/Templates/Ulysses Metadata.textbundle/text.markdown"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(metadataMarkdown.contains("#ulysses/group-metadata #ulysses/template"))
+        XCTAssertTrue(metadataMarkdown.contains("- Ulysses icon: Material"))
+        XCTAssertTrue(metadataMarkdown.contains("- Ulysses color: gray"))
+        XCTAssertTrue(metadataMarkdown.contains("## Goal"))
+        XCTAssertTrue(metadataMarkdown.contains("- targetResult: 100"))
+
+        let reportMarkdown = try String(contentsOf: output.appendingPathComponent("Ulysses Export Report.textbundle/text.markdown"), encoding: .utf8)
+        XCTAssertTrue(reportMarkdown.contains("- Sheets: 2"))
+        XCTAssertTrue(reportMarkdown.contains("- Template sheets: 1"))
+        XCTAssertTrue(reportMarkdown.contains("- Trash sheets: 1"))
+
+        let reportData = try Data(contentsOf: output.appendingPathComponent("ulysses-export-report.json"))
+        let report = try JSONSerialization.jsonObject(with: reportData) as? [String: Any]
+        let counts = try XCTUnwrap(report?["counts"] as? [String: Any])
+        XCTAssertEqual(counts["sheets"] as? Int, 2)
+        XCTAssertEqual(counts["favoriteSheets"] as? Int, 1)
+
+        let infoData = try Data(contentsOf: output.appendingPathComponent("Archive/Content/Templates/Reusable Draft.textbundle/info.json"))
+        let info = try JSONSerialization.jsonObject(with: infoData) as? [String: Any]
+        XCTAssertEqual(info?["version"] as? Int, 2)
+        XCTAssertEqual(info?["type"] as? String, "net.daringfireball.markdown")
+        XCTAssertEqual(info?["flatExtension"] as? String, "markdown")
+        XCTAssertEqual(info?["creatorIdentifier"] as? String, "org.deverman.export-ulysses")
+        XCTAssertNotNil(info?["created"])
+        XCTAssertNotNil(info?["modified"])
+    }
+
+    func testAnalyzeIsDryRunAndReturnsSupportJSON() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let sheet = input.appendingPathComponent("Store.ulstoragebackup/Content/Unfiled-ulgroup/missing.ulysses")
+        let output = root.appendingPathComponent("Output")
+        try FileManager.default.createDirectory(at: sheet, withIntermediateDirectories: true)
+        try contentXML("""
+        <sheet>
+        <string xml:space="preserve">
+        <p><tags><tag kind="heading1"># </tag></tags>Dry Run</p>
+        <p><element kind="image"><attribute identifier="image">not-found</attribute></element></p>
+        </string>
+        </sheet>
+        """).write(to: sheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+
+        let analysis = try await Exporter().analyze(input: input.path, keepGroups: true, ignoring: [])
+
+        XCTAssertEqual(analysis.summary.sheets, 1)
+        XCTAssertEqual(analysis.summary.missingMedia, 1)
+        XCTAssertTrue(analysis.reportMarkdown.contains("# Ulysses Export Report"))
+        XCTAssertTrue(analysis.supportJSON.contains("\"missingMedia\" : 1"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: output.path))
+    }
+
+    func testRealBackupSmokeWhenEnvironmentIsProvided() async throws {
+        guard let path = ProcessInfo.processInfo.environment["ULYSSES_BACKUP_PATH"], !path.isEmpty else {
+            throw XCTSkip("Set ULYSSES_BACKUP_PATH to run the private real-backup smoke test.")
+        }
+
+        let analysis = try await Exporter().analyze(input: path, keepGroups: true, ignoring: [])
+
+        XCTAssertGreaterThan(analysis.summary.sheets, 0)
+        XCTAssertTrue(analysis.reportMarkdown.contains("# Ulysses Export Report"))
+        XCTAssertTrue(analysis.supportJSON.contains("\"counts\""))
+    }
+
     private func contentXML(_ body: String) -> String {
         """
         <?xml version="1.0" encoding="UTF-8"?>
@@ -228,7 +351,15 @@ final class UlyssesExporterTests: XCTestCase {
         """)
     }
 
-    private func writeInfo(displayName: String, sheetClusters: [[String]] = [], to url: URL) throws {
+    private func writeInfo(
+        displayName: String,
+        sheetClusters: [[String]] = [],
+        childOrder: [String] = [],
+        icon: String? = nil,
+        tint: String? = nil,
+        countingGoal: [String: String] = [:],
+        to url: URL
+    ) throws {
         let clusters = sheetClusters.map { cluster in
             let sheets = cluster.map { "<string>\($0)</string>" }.joined(separator: "\n")
             return "<array>\n\(sheets)\n</array>"
@@ -240,12 +371,28 @@ final class UlyssesExporterTests: XCTestCase {
           \(clusters)
           </array>
         """
+        let childOrderXML = childOrder.isEmpty ? "" : """
+
+          <key>childOrder</key>
+          <array>
+          \(childOrder.map { "<string>\($0)</string>" }.joined(separator: "\n"))
+          </array>
+        """
+        let iconXML = icon.map { "\n  <key>userIconName</key>\n  <string>\($0)</string>" } ?? ""
+        let tintXML = tint.map { "\n  <key>userTintColor</key>\n  <string>\($0)</string>" } ?? ""
+        let countingGoalXML = countingGoal.isEmpty ? "" : """
+
+          <key>countingGoal</key>
+          <dict>
+          \(countingGoal.sorted(by: { $0.key < $1.key }).map { "<key>\($0.key)</key>\n<string>\($0.value)</string>" }.joined(separator: "\n"))
+          </dict>
+        """
         try """
         <?xml version="1.0" encoding="UTF-8"?>
         <plist version="1.0">
         <dict>
           <key>displayName</key>
-          <string>\(displayName)</string>\(sheetClustersXML)
+          <string>\(displayName)</string>\(sheetClustersXML)\(childOrderXML)\(iconXML)\(tintXML)\(countingGoalXML)
         </dict>
         </plist>
         """.write(to: url, atomically: true, encoding: .utf8)
