@@ -103,6 +103,56 @@ final class UlyssesExporterTests: XCTestCase {
         XCTAssertTrue(markdown.contains("#ulysses/material #ulysses/archive"))
     }
 
+    func testWritesUlyssesSheetOrderNotesAndTagsGluedSheets() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let projectContent = input.appendingPathComponent("project.ulstoragebackup/Content")
+        let main = projectContent.appendingPathComponent("Main-ulgroup")
+        let orderedGroup = main.appendingPathComponent("ordered-ulgroup")
+        let first = orderedGroup.appendingPathComponent("first.ulysses")
+        let second = orderedGroup.appendingPathComponent("second.ulysses")
+        let third = orderedGroup.appendingPathComponent("third.ulysses")
+        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: third, withIntermediateDirectories: true)
+        try writeInfo(displayName: "Project", to: projectContent.appendingPathComponent("Info.ulgroup"))
+        try writeInfo(displayName: "Content", to: main.appendingPathComponent("Info.ulgroup"))
+        try writeInfo(
+            displayName: "Ordered",
+            sheetClusters: [["second.ulysses"], ["first.ulysses", "third.ulysses"]],
+            to: orderedGroup.appendingPathComponent("Info.ulgroup")
+        )
+        try titledSheet("First").write(to: first.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+        try titledSheet("Second").write(to: second.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+        try titledSheet("Third").write(to: third.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+
+        let output = root.appendingPathComponent("Output")
+        let summary = try await Exporter(maxConcurrentExports: 3).run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+
+        XCTAssertEqual(summary.sheets, 3)
+        XCTAssertEqual(summary.gluedSheets, 2)
+        XCTAssertEqual(summary.orderNotes, 1)
+
+        let folder = output.appendingPathComponent("Project/Content/Ordered")
+        let orderMarkdown = try String(
+            contentsOf: folder.appendingPathComponent("Ulysses Sheet Order.textbundle/text.markdown"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(orderMarkdown.contains("#ulysses/order-index #ulysses/glued"))
+        XCTAssertTrue(orderMarkdown.contains("1. [Second](Second.textbundle)"))
+        XCTAssertTrue(orderMarkdown.contains("2. Glued sheets"))
+        XCTAssertTrue(orderMarkdown.contains("- [First](First.textbundle)"))
+        XCTAssertTrue(orderMarkdown.contains("- [Third](Third.textbundle)"))
+        XCTAssertLessThan(orderMarkdown.range(of: "[Second]")!.lowerBound, orderMarkdown.range(of: "Glued sheets")!.lowerBound)
+
+        let firstMarkdown = try String(contentsOf: folder.appendingPathComponent("First.textbundle/text.markdown"), encoding: .utf8)
+        let thirdMarkdown = try String(contentsOf: folder.appendingPathComponent("Third.textbundle/text.markdown"), encoding: .utf8)
+        let secondMarkdown = try String(contentsOf: folder.appendingPathComponent("Second.textbundle/text.markdown"), encoding: .utf8)
+        XCTAssertTrue(firstMarkdown.contains("#ulysses/glued"))
+        XCTAssertTrue(thirdMarkdown.contains("#ulysses/glued"))
+        XCTAssertFalse(secondMarkdown.contains("#ulysses/glued"))
+    }
+
     func testRecoversMissingSheetMediaFromSameBackup() async throws {
         let root = try temporaryDirectory()
         let input = root.appendingPathComponent("Backup.ulbackup")
@@ -166,6 +216,39 @@ final class UlyssesExporterTests: XCTestCase {
         <?xml version="1.0" encoding="UTF-8"?>
         \(body)
         """
+    }
+
+    private func titledSheet(_ title: String) -> String {
+        contentXML("""
+        <sheet>
+        <string xml:space="preserve">
+        <p><tags><tag kind="heading1"># </tag></tags>\(title)</p>
+        </string>
+        </sheet>
+        """)
+    }
+
+    private func writeInfo(displayName: String, sheetClusters: [[String]] = [], to url: URL) throws {
+        let clusters = sheetClusters.map { cluster in
+            let sheets = cluster.map { "<string>\($0)</string>" }.joined(separator: "\n")
+            return "<array>\n\(sheets)\n</array>"
+        }.joined(separator: "\n")
+        let sheetClustersXML = sheetClusters.isEmpty ? "" : """
+
+          <key>sheetClusters</key>
+          <array>
+          \(clusters)
+          </array>
+        """
+        try """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <plist version="1.0">
+        <dict>
+          <key>displayName</key>
+          <string>\(displayName)</string>\(sheetClustersXML)
+        </dict>
+        </plist>
+        """.write(to: url, atomically: true, encoding: .utf8)
     }
 
     private func temporaryDirectory() throws -> URL {

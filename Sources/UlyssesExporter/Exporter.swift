@@ -7,6 +7,8 @@ public struct ExportSummary: Sendable, Equatable {
     public var inlineImages = 0
     public var keywords = 0
     public var materialSheets = 0
+    public var gluedSheets = 0
+    public var orderNotes = 0
     public var missingMedia = 0
     public var recoveredMedia = 0
     public var unsupportedNodes = 0
@@ -19,6 +21,8 @@ public struct ExportSummary: Sendable, Equatable {
         inlineImages += other.inlineImages
         keywords += other.keywords
         materialSheets += other.materialSheets
+        gluedSheets += other.gluedSheets
+        orderNotes += other.orderNotes
         missingMedia += other.missingMedia
         recoveredMedia += other.recoveredMedia
         unsupportedNodes += other.unsupportedNodes
@@ -62,11 +66,12 @@ public struct Exporter {
         }
 
         let mediaIndex = MediaIndex(sheets: sheets)
-        return try await export(sheets, to: outputURL, mediaIndex: mediaIndex)
+        let sheetOrderIndex = SheetOrderIndex(sheets: sheets)
+        return try await export(sheets, to: outputURL, mediaIndex: mediaIndex, sheetOrderIndex: sheetOrderIndex)
     }
 
-    private func export(_ sheets: [SheetSource], to outputURL: URL, mediaIndex: MediaIndex) async throws -> ExportSummary {
-        try await withThrowingTaskGroup(of: ExportSummary.self) { group in
+    private func export(_ sheets: [SheetSource], to outputURL: URL, mediaIndex: MediaIndex, sheetOrderIndex: SheetOrderIndex) async throws -> ExportSummary {
+        try await withThrowingTaskGroup(of: SheetExportResult.self) { group in
             var nextSheetIndex = 0
 
             func enqueueNextSheet() {
@@ -74,7 +79,7 @@ public struct Exporter {
                 let sheet = sheets[nextSheetIndex]
                 nextSheetIndex += 1
                 group.addTask {
-                    try SheetExporter(mediaIndex: mediaIndex).export(sheet, to: outputURL)
+                    try SheetExporter(mediaIndex: mediaIndex, sheetOrderIndex: sheetOrderIndex).export(sheet, to: outputURL)
                 }
             }
 
@@ -83,15 +88,21 @@ public struct Exporter {
             }
 
             var summary = ExportSummary()
+            var orderEntries: [SheetOrderEntry] = []
             var exported = 0
-            for try await sheetSummary in group {
+            for try await result in group {
                 exported += 1
-                summary.add(sheetSummary)
+                summary.add(result.summary)
+                orderEntries.append(result.orderEntry)
                 enqueueNextSheet()
                 if verbose, exported % 100 == 0 {
                     print("Exported \(exported) sheets.")
                 }
             }
+            summary.orderNotes = try SheetOrderNoteWriter(
+                sheetOrderIndex: sheetOrderIndex,
+                outputURL: outputURL
+            ).writeOrderNotes(for: orderEntries)
             return summary
         }
     }
@@ -117,6 +128,7 @@ public enum ExportError: Error, LocalizedError {
 public struct SheetSource: Sendable, Equatable {
     public let packageURL: URL
     public let contentURL: URL
+    public let groupURL: URL
     public let groupPath: [String]
 }
 
@@ -145,7 +157,7 @@ struct UlyssesBackupReader {
                 continue
             }
 
-            sheets.append(SheetSource(packageURL: url, contentURL: contentURL, groupPath: groupPath))
+            sheets.append(SheetSource(packageURL: url, contentURL: contentURL, groupURL: url.deletingLastPathComponent(), groupPath: groupPath))
             enumerator.skipDescendants()
         }
         return sheets
@@ -207,8 +219,9 @@ struct UlyssesBackupReader {
 
 struct SheetExporter {
     let mediaIndex: MediaIndex
+    let sheetOrderIndex: SheetOrderIndex
 
-    func export(_ source: SheetSource, to outputRoot: URL) throws -> ExportSummary {
+    func export(_ source: SheetSource, to outputRoot: URL) throws -> SheetExportResult {
         let data = try readDataWithRetry(from: source.contentURL)
         var sheet = try UlyssesSheetParser(contentURL: source.contentURL).parse(data)
         sheet.migrationTags.append(contentsOf: migrationTags(for: source, sheet: sheet))
@@ -221,6 +234,7 @@ struct SheetExporter {
         summary.fileAttachments = sheet.fileAttachmentIDs.count
         summary.keywords = sheet.keywords.count
         summary.materialSheets = sheet.isMaterial ? 1 : 0
+        summary.gluedSheets = sheetOrderIndex.clusterInfo(for: source)?.isGlued == true ? 1 : 0
 
         let bundleName = sanitizedFileName(rendered.title.isEmpty ? source.packageURL.deletingPathExtension().lastPathComponent : rendered.title)
         var destinationDirectory = outputRoot
@@ -252,7 +266,17 @@ struct SheetExporter {
         }
 
         try apply(dates: dates, to: [bundleURL, assetsURL, textURL, infoURL])
-        return summary
+        return SheetExportResult(
+            summary: summary,
+            orderEntry: SheetOrderEntry(
+                sourcePackageName: source.packageURL.lastPathComponent,
+                sourceGroupURL: source.groupURL,
+                groupPath: source.groupPath,
+                title: rendered.title.isEmpty ? bundleName : rendered.title,
+                destinationName: bundleURL.lastPathComponent,
+                dates: dates
+            )
+        )
     }
 
     private func readDataWithRetry(from url: URL) throws -> Data {
@@ -309,6 +333,9 @@ struct SheetExporter {
         if sheet.isMaterial {
             tags.append("ulysses/material")
         }
+        if sheetOrderIndex.clusterInfo(for: source)?.isGlued == true {
+            tags.append("ulysses/glued")
+        }
         if source.groupPath.first?.trimmingCharacters(in: .whitespacesAndNewlines).localizedCaseInsensitiveCompare("Archive") == .orderedSame {
             tags.append("ulysses/archive")
         }
@@ -316,9 +343,219 @@ struct SheetExporter {
     }
 }
 
-struct SheetDates: Equatable {
+struct SheetExportResult: Sendable, Equatable {
+    let summary: ExportSummary
+    let orderEntry: SheetOrderEntry
+}
+
+struct SheetOrderEntry: Sendable, Equatable {
+    let sourcePackageName: String
+    let sourceGroupURL: URL
+    let groupPath: [String]
+    let title: String
+    let destinationName: String
+    let dates: SheetDates
+}
+
+struct SheetDates: Sendable, Equatable {
     let created: Date
     let modified: Date
+}
+
+struct SheetClusterInfo: Sendable, Equatable {
+    let order: Int
+    let clusterSize: Int
+
+    var isGlued: Bool { clusterSize > 1 }
+}
+
+struct GroupSheetOrder: Sendable, Equatable {
+    let groupURL: URL
+    let sheetClusters: [[String]]
+}
+
+struct SheetOrderIndex: Sendable, Equatable {
+    private let ordersByGroupPath: [String: GroupSheetOrder]
+    private let clusterInfoBySheetPath: [String: SheetClusterInfo]
+
+    init(sheets: [SheetSource]) {
+        let uniqueGroupURLs = Dictionary(grouping: sheets, by: { $0.groupURL.standardizedFileURL.path })
+            .compactMap { $0.value.first?.groupURL }
+
+        var ordersByGroupPath: [String: GroupSheetOrder] = [:]
+        var clusterInfoBySheetPath: [String: SheetClusterInfo] = [:]
+
+        for groupURL in uniqueGroupURLs {
+            let clusters = Self.sheetClusters(for: groupURL)
+            guard !clusters.isEmpty else { continue }
+
+            let order = GroupSheetOrder(groupURL: groupURL, sheetClusters: clusters)
+            ordersByGroupPath[groupURL.standardizedFileURL.path] = order
+
+            for (clusterIndex, cluster) in clusters.enumerated() {
+                for sheetName in cluster {
+                    let sheetURL = groupURL.appendingPathComponent(sheetName)
+                    clusterInfoBySheetPath[sheetURL.standardizedFileURL.path] = SheetClusterInfo(
+                        order: clusterIndex,
+                        clusterSize: cluster.count
+                    )
+                }
+            }
+        }
+
+        self.ordersByGroupPath = ordersByGroupPath
+        self.clusterInfoBySheetPath = clusterInfoBySheetPath
+    }
+
+    func order(for groupURL: URL) -> GroupSheetOrder? {
+        ordersByGroupPath[groupURL.standardizedFileURL.path]
+    }
+
+    func clusterInfo(for source: SheetSource) -> SheetClusterInfo? {
+        clusterInfoBySheetPath[source.packageURL.standardizedFileURL.path]
+    }
+
+    private static func sheetClusters(for groupURL: URL) -> [[String]] {
+        let infoURL = groupURL.appendingPathComponent("Info.ulgroup")
+        guard let data = try? Data(contentsOf: infoURL),
+              let dictionary = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let rawClusters = dictionary["sheetClusters"] as? [[String]]
+        else {
+            return []
+        }
+
+        return rawClusters
+            .map { cluster in cluster.filter { $0.hasSuffix(".ulysses") } }
+            .filter { !$0.isEmpty }
+    }
+}
+
+struct SheetOrderNoteWriter {
+    let sheetOrderIndex: SheetOrderIndex
+    let outputURL: URL
+
+    func writeOrderNotes(for entries: [SheetOrderEntry]) throws -> Int {
+        let entriesByGroup = Dictionary(grouping: entries, by: { $0.sourceGroupURL.standardizedFileURL.path })
+        var written = 0
+
+        for groupEntries in entriesByGroup.values {
+            guard let first = groupEntries.first,
+                  !first.groupPath.isEmpty,
+                  let groupOrder = sheetOrderIndex.order(for: first.sourceGroupURL)
+            else {
+                continue
+            }
+
+            let orderedClusters = orderedEntries(from: groupEntries, groupOrder: groupOrder)
+            let hasGluedCluster = orderedClusters.contains { $0.count > 1 }
+            let orderedSheetCount = orderedClusters.flatMap { $0 }.count
+            guard orderedSheetCount > 1 || hasGluedCluster else { continue }
+
+            var destinationDirectory = outputURL
+            for group in first.groupPath {
+                destinationDirectory.appendPathComponent(sanitizedFileName(group))
+            }
+            try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+
+            let dates = datesForOrderNote(entries: groupEntries)
+            let bundleURL = try DestinationAllocator.shared.createBundle(
+                at: destinationDirectory.appendingPathComponent("Ulysses Sheet Order").appendingPathExtension("textbundle")
+            )
+            let textURL = bundleURL.appendingPathComponent("text.markdown")
+            let infoURL = bundleURL.appendingPathComponent("info.json")
+            let assetsURL = bundleURL.appendingPathComponent("assets")
+
+            try markdown(for: orderedClusters, hasGluedCluster: hasGluedCluster)
+                .write(to: textURL, atomically: true, encoding: .utf8)
+            try infoJSON(for: dates).write(to: infoURL, atomically: true, encoding: .utf8)
+            try apply(dates: dates, to: [bundleURL, assetsURL, textURL, infoURL])
+            written += 1
+        }
+
+        return written
+    }
+
+    private func orderedEntries(from entries: [SheetOrderEntry], groupOrder: GroupSheetOrder) -> [[SheetOrderEntry]] {
+        let entriesBySourceName = Dictionary(uniqueKeysWithValues: entries.map { ($0.sourcePackageName, $0) })
+        var orderedClusters: [[SheetOrderEntry]] = []
+        var included = Set<String>()
+
+        for cluster in groupOrder.sheetClusters {
+            let resolved = cluster.compactMap { sheetName -> SheetOrderEntry? in
+                guard let entry = entriesBySourceName[sheetName] else { return nil }
+                included.insert(sheetName)
+                return entry
+            }
+            if !resolved.isEmpty {
+                orderedClusters.append(resolved)
+            }
+        }
+
+        let remaining = entries
+            .filter { !included.contains($0.sourcePackageName) }
+            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        orderedClusters.append(contentsOf: remaining.map { [$0] })
+
+        return orderedClusters
+    }
+
+    private func markdown(for clusters: [[SheetOrderEntry]], hasGluedCluster: Bool) -> String {
+        var lines = [
+            "# Ulysses Sheet Order",
+            "",
+            hasGluedCluster ? "#ulysses/order-index #ulysses/glued" : "#ulysses/order-index",
+            "",
+            "## Sheets"
+        ]
+
+        for (index, cluster) in clusters.enumerated() {
+            if cluster.count == 1, let entry = cluster.first {
+                lines.append("\(index + 1). \(link(for: entry))")
+                continue
+            }
+
+            lines.append("\(index + 1). Glued sheets")
+            for entry in cluster {
+                lines.append("   - \(link(for: entry))")
+            }
+        }
+
+        lines.append("")
+        return lines.joined(separator: "\n")
+    }
+
+    private func link(for entry: SheetOrderEntry) -> String {
+        "[\(escapeMarkdownLinkText(entry.title))](\(markdownPath(for: entry.destinationName)))"
+    }
+
+    private func datesForOrderNote(entries: [SheetOrderEntry]) -> SheetDates {
+        let created = entries.map(\.dates.created).min() ?? Date()
+        let modified = entries.map(\.dates.modified).max() ?? Date()
+        return SheetDates(created: created, modified: modified)
+    }
+
+    private func apply(dates: SheetDates, to urls: [URL]) throws {
+        let attributes: [FileAttributeKey: Any] = [
+            .creationDate: dates.created,
+            .modificationDate: dates.modified
+        ]
+        for url in urls where FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.setAttributes(attributes, ofItemAtPath: url.path)
+        }
+    }
+
+    private func infoJSON(for dates: SheetDates) -> String {
+        let created = Int(dates.created.timeIntervalSince1970)
+        let modified = Int(dates.modified.timeIntervalSince1970)
+        return """
+        {
+          "version": 2,
+          "type": "net.daringfireball.markdown",
+          "created": \(created),
+          "modified": \(modified)
+        }
+        """
+    }
 }
 
 final class DestinationAllocator: @unchecked Sendable {
@@ -904,9 +1141,19 @@ private func tagSlug(_ value: String) -> String {
 }
 
 private func assetMarkdownPath(for destinationName: String) -> String {
+    "assets/\(markdownPath(for: destinationName))"
+}
+
+private func markdownPath(for fileName: String) -> String {
     let allowed = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "#%?[]"))
-    let escaped = destinationName.addingPercentEncoding(withAllowedCharacters: allowed) ?? destinationName
-    return "assets/\(escaped)"
+    return fileName.addingPercentEncoding(withAllowedCharacters: allowed) ?? fileName
+}
+
+private func escapeMarkdownLinkText(_ value: String) -> String {
+    value
+        .replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "[", with: "\\[")
+        .replacingOccurrences(of: "]", with: "\\]")
 }
 
 private func isImageFile(_ fileName: String) -> Bool {
