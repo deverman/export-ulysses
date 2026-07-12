@@ -12,6 +12,10 @@
     <string>org.deverman.ExportUlysses</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
+    <key>CFBundleIconFile</key>
+    <string>ExportUlysses.icns</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>CFBundleName</key>
     <string>Export Ulysses</string>
     <key>CFBundlePackageType</key>

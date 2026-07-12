@@ -19,6 +19,11 @@ Architecture boundaries:
 - `Exporter.swift`: Ulysses 40 reader, sheet preparation, Markdown rendering, media resolution, migration orchestration
 - `MigrationNotes.swift`: consolidated human and private migration indexes
 - `OutputValidation.swift`: staging transaction and final TextBundle validation
+- `Ulysses40BackupReader.swift`: Ulysses 40 package discovery and metadata reading
+- `SheetExporter.swift`: one-sheet preparation and export accounting
+- `MigrationLayout.swift`: deterministic group paths, ordering, naming, and TextBundle writing
+- `SheetRendering.swift`: Ulysses XML parsing, Markdown rendering, and media resolution
+- `ExportReporting.swift`: visible migration report and privacy-safe support JSON
 - `main.swift`: two-command CLI only
 - `Sources/ExportUlyssesApp`: SwiftUI presentation, native panels, progress, and FSNotes launch actions; no migration parsing or writing logic
 - `ExportUlysses.xcodeproj`: sandboxed `APP_STORE` target and shared archive scheme; links the local `UlyssesExporter` package product

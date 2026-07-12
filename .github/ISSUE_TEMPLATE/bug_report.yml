@@ -29,8 +29,8 @@ body:
     attributes:
       label: FSNotes setup
       options:
-        - label: I selected the export root as FSNotes Default Storage.
-        - label: I verified the FSNotes Trash path points inside that root.
+        - label: I kept my existing Default Storage, or intentionally selected the export as a new Default Storage.
+        - label: I reviewed the existing-library and new-library instructions before integrating Trash.
         - label: I exported Ulysses External Folders separately.
   - type: textarea
     id: behavior

@@ -1,0 +1,307 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* ExportUlyssesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* ExportUlyssesApp.swift */; };
+		A10000000000000000000002 /* AppDistribution.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* AppDistribution.swift */; };
+		A10000000000000000000003 /* MigrationPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* MigrationPhase.swift */; };
+		A10000000000000000000004 /* PanelService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* PanelService.swift */; };
+		A10000000000000000000005 /* WorkspaceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* WorkspaceService.swift */; };
+		A10000000000000000000006 /* SecurityScopedAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* SecurityScopedAccess.swift */; };
+		A10000000000000000000007 /* SampleBackupFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* SampleBackupFactory.swift */; };
+		A10000000000000000000008 /* MigrationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* MigrationStore.swift */; };
+		A10000000000000000000009 /* CompletionSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* CompletionSection.swift */; };
+		A1000000000000000000000A /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000A /* ContentView.swift */; };
+		A1000000000000000000000B /* LocationSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000B /* LocationSection.swift */; };
+		A1000000000000000000000C /* MigrationSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000C /* MigrationSummaryView.swift */; };
+		A1000000000000000000000D /* PreflightSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000D /* PreflightSection.swift */; };
+		A1000000000000000000000E /* PrivacyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000E /* PrivacyView.swift */; };
+		A1000000000000000000000F /* UlyssesExporter in Frameworks */ = {isa = PBXBuildFile; productRef = A90000000000000000000001 /* UlyssesExporter */; };
+		A10000000000000000000010 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A20000000000000000000001 /* ExportUlyssesApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ExportUlyssesApp/App/ExportUlyssesApp.swift; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000002 /* AppDistribution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ExportUlyssesApp/Models/AppDistribution.swift; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000003 /* MigrationPhase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ExportUlyssesApp/Models/MigrationPhase.swift; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000004 /* PanelService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ExportUlyssesApp/Services/PanelService.swift; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000005 /* WorkspaceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ExportUlyssesApp/Services/WorkspaceService.swift; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000006 /* SecurityScopedAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ExportUlyssesApp/Services/SecurityScopedAccess.swift; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000007 /* SampleBackupFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ExportUlyssesApp/Services/SampleBackupFactory.swift; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000008 /* MigrationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ExportUlyssesApp/Stores/MigrationStore.swift; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000009 /* CompletionSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ExportUlyssesApp/Views/CompletionSection.swift; sourceTree = SOURCE_ROOT; };
+		A2000000000000000000000A /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ExportUlyssesApp/Views/ContentView.swift; sourceTree = SOURCE_ROOT; };
+		A2000000000000000000000B /* LocationSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ExportUlyssesApp/Views/LocationSection.swift; sourceTree = SOURCE_ROOT; };
+		A2000000000000000000000C /* MigrationSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ExportUlyssesApp/Views/MigrationSummaryView.swift; sourceTree = SOURCE_ROOT; };
+		A2000000000000000000000D /* PreflightSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ExportUlyssesApp/Views/PreflightSection.swift; sourceTree = SOURCE_ROOT; };
+		A2000000000000000000000E /* PrivacyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/ExportUlyssesApp/Views/PrivacyView.swift; sourceTree = SOURCE_ROOT; };
+		A2000000000000000000000F /* ExportUlyssesApp-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Packaging/ExportUlyssesApp-Info.plist; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000010 /* AppStore.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Packaging/AppStore.entitlements; sourceTree = SOURCE_ROOT; };
+		A20000000000000000000011 /* Export Ulysses.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Export Ulysses.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Resources/Assets.xcassets; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1000000000000000000000F /* UlyssesExporter in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A40000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000002 /* App Sources */,
+				A40000000000000000000003 /* Packaging */,
+				A40000000000000000000004 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A40000000000000000000002 /* App Sources */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000001 /* ExportUlyssesApp.swift */,
+				A20000000000000000000002 /* AppDistribution.swift */,
+				A20000000000000000000003 /* MigrationPhase.swift */,
+				A20000000000000000000004 /* PanelService.swift */,
+				A20000000000000000000005 /* WorkspaceService.swift */,
+				A20000000000000000000006 /* SecurityScopedAccess.swift */,
+				A20000000000000000000007 /* SampleBackupFactory.swift */,
+				A20000000000000000000008 /* MigrationStore.swift */,
+				A20000000000000000000009 /* CompletionSection.swift */,
+				A2000000000000000000000A /* ContentView.swift */,
+				A2000000000000000000000B /* LocationSection.swift */,
+				A2000000000000000000000C /* MigrationSummaryView.swift */,
+				A2000000000000000000000D /* PreflightSection.swift */,
+				A2000000000000000000000E /* PrivacyView.swift */,
+			);
+			name = "App Sources";
+			sourceTree = "<group>";
+		};
+		A40000000000000000000003 /* Packaging */ = {
+			isa = PBXGroup;
+			children = (
+				A2000000000000000000000F /* ExportUlyssesApp-Info.plist */,
+				A20000000000000000000010 /* AppStore.entitlements */,
+				A20000000000000000000012 /* Assets.xcassets */,
+			);
+			name = Packaging;
+			sourceTree = "<group>";
+		};
+		A40000000000000000000004 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000011 /* Export Ulysses.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A50000000000000000000001 /* Export Ulysses */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A80000000000000000000002 /* Build configuration list for PBXNativeTarget "Export Ulysses" */;
+			buildPhases = (
+				A60000000000000000000001 /* Sources */,
+				A30000000000000000000001 /* Frameworks */,
+				A60000000000000000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "Export Ulysses";
+			packageProductDependencies = (
+				A90000000000000000000001 /* UlyssesExporter */,
+			);
+			productName = "Export Ulysses";
+			productReference = A20000000000000000000011 /* Export Ulysses.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A70000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2630;
+				LastUpgradeCheck = 2630;
+				TargetAttributes = {
+					A50000000000000000000001 = {
+						CreatedOnToolsVersion = 26.3;
+					};
+				};
+			};
+			buildConfigurationList = A80000000000000000000001 /* Build configuration list for PBXProject "ExportUlysses" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A40000000000000000000001;
+			packageReferences = (
+				A90000000000000000000002 /* XCLocalSwiftPackageReference "." */,
+			);
+			productRefGroup = A40000000000000000000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A50000000000000000000001 /* Export Ulysses */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A60000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000010 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A60000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000001 /* ExportUlyssesApp.swift in Sources */,
+				A10000000000000000000002 /* AppDistribution.swift in Sources */,
+				A10000000000000000000003 /* MigrationPhase.swift in Sources */,
+				A10000000000000000000004 /* PanelService.swift in Sources */,
+				A10000000000000000000005 /* WorkspaceService.swift in Sources */,
+				A10000000000000000000006 /* SecurityScopedAccess.swift in Sources */,
+				A10000000000000000000007 /* SampleBackupFactory.swift in Sources */,
+				A10000000000000000000008 /* MigrationStore.swift in Sources */,
+				A10000000000000000000009 /* CompletionSection.swift in Sources */,
+				A1000000000000000000000A /* ContentView.swift in Sources */,
+				A1000000000000000000000B /* LocationSection.swift in Sources */,
+				A1000000000000000000000C /* MigrationSummaryView.swift in Sources */,
+				A1000000000000000000000D /* PreflightSection.swift in Sources */,
+				A1000000000000000000000E /* PrivacyView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A80000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A80000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		A80000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Packaging/AppStore.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Packaging/ExportUlyssesApp-Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				ONLY_ACTIVE_ARCH = YES;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.deverman.ExportUlysses;
+				PRODUCT_NAME = "Export Ulysses";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "APP_STORE DEBUG $(inherited)";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A80000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Packaging/AppStore.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Packaging/ExportUlyssesApp-Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.deverman.ExportUlysses;
+				PRODUCT_NAME = "Export Ulysses";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "APP_STORE $(inherited)";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A80000000000000000000001 /* Build configuration list for PBXProject "ExportUlysses" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A80000000000000000000003 /* Debug */,
+				A80000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A80000000000000000000002 /* Build configuration list for PBXNativeTarget "Export Ulysses" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A80000000000000000000005 /* Debug */,
+				A80000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A90000000000000000000002 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A90000000000000000000001 /* UlyssesExporter */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A90000000000000000000002 /* XCLocalSwiftPackageReference "." */;
+			productName = UlyssesExporter;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A70000000000000000000001 /* Project object */;
+}

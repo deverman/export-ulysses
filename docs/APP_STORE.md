@@ -16,7 +16,7 @@ Security-scoped bookmarks remember the selected backup and destination. The shar
 
 1. Join the Apple Developer Program and create a macOS App ID for `org.deverman.ExportUlysses`.
 2. Set the development team on the **Export Ulysses** target in Xcode.
-3. Add a production AppIcon asset before submission. The project intentionally does not ship a placeholder marketing icon.
+3. Review the included production AppIcon at every required size and replace it only if the product identity changes.
 4. Create the app in App Store Connect using the same bundle ID.
 5. Configure it as a paid upfront app. No StoreKit or in-app purchase code is required because purchase happens before download and the app has no separately unlocked functionality.
 6. Use the Utilities category and macOS 26.0 minimum version.

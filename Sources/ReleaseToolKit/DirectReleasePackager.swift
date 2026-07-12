@@ -91,8 +91,16 @@ public struct DirectReleasePackager {
             throw CocoaError(.propertyListReadCorrupt)
         }
         plist["CFBundleShortVersionString"] = version
+        plist.removeValue(forKey: "CFBundleIconName")
         let output = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
         try output.write(to: app.appendingPathComponent("Contents/Info.plist"), options: .atomic)
+
+        let resources = app.appendingPathComponent("Contents/Resources", isDirectory: true)
+        try fileManager.createDirectory(at: resources, withIntermediateDirectories: true)
+        try fileManager.copyItem(
+            at: repositoryRoot.appendingPathComponent("Resources/ExportUlysses.icns"),
+            to: resources.appendingPathComponent("ExportUlysses.icns")
+        )
     }
 
     private func sign(package: URL, identity: String, repositoryRoot: URL) throws {

@@ -3,12 +3,18 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   test:
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -20,6 +26,8 @@ jobs:
         run: swift --version
       - name: Resolve dependencies
         run: swift package resolve
+      - name: Verify tracked App Store project
+        run: test -f ExportUlysses.xcodeproj/project.pbxproj
       - name: Build release
         run: swift build -c release
       - name: Build App Store target

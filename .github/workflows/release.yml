@@ -11,8 +11,29 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: signed-release-${{ inputs.version }}
+  cancel-in-progress: false
+
 jobs:
+  validate:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve dependencies
+        run: swift package resolve
+      - name: Test
+        run: swift test
+      - name: Build App Store target
+        run: >-
+          xcodebuild -project ExportUlysses.xcodeproj -scheme "Export Ulysses"
+          -configuration Release -destination "generic/platform=macOS"
+          CODE_SIGNING_ALLOWED=NO build
+
   release:
+    needs: validate
+    timeout-minutes: 60
     strategy:
       max-parallel: 1
       matrix:

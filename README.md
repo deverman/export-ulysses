@@ -1,6 +1,10 @@
 # export-ulysses
 
-Migrate a Ulysses 40 backup into a validated FSNotes library without dropping sheets, sidebar notes, comments, attachments, images, groups, order, or Trash state.
+[![CI](https://github.com/deverman/export-ulysses/actions/workflows/ci.yml/badge.svg)](https://github.com/deverman/export-ulysses/actions/workflows/ci.yml)
+
+<img src="Resources/ExportUlysses-AppIcon-Source.png" alt="Export Ulysses app icon" width="128">
+
+Migrate a Ulysses 40 backup into a validated FSNotes library while preserving every recoverable sheet, sidebar note, comment, attachment, image, group, order relationship, and Trash state.
 
 Verified with Ulysses 40 build 83290, macOS 26 Tahoe, Swift 6.3.2, TextBundle v2, and FSNotes. Format changes are reported during preflight: optional metadata drift produces warnings, while structural changes that could silently lose sheet content stop migration by default. Maintainers can inspect an unverified format with the CLI's `--allow-unknown-format` override.
 
@@ -60,6 +64,14 @@ FSNotes only treats its configured Trash folder as system Trash. To retain the U
 
 FSNotes has no portable TextBundle field for native pins, Ulysses goals, group colors/icons, or per-folder sort settings. Those values are kept visibly rather than pretending FSNotes can recreate the Ulysses UI.
 
+## Known Limits
+
+- Only Ulysses 40 build 83290 backups are currently verified. Preflight reports format drift before migration.
+- Ulysses External Folders are not stored in `.ulbackup` packages and must be migrated separately.
+- Media bytes missing from the backup cannot be recreated. The migration report identifies every unresolved reference.
+- Some Ulysses concepts have no native FSNotes equivalent; the exporter preserves them as visible tags and migration notes instead.
+- An external FSNotes folder does not receive native Inbox or Trash behavior. See [Add The Migration To FSNotes](#add-the-migration-to-fsnotes).
+
 ## Safety Model
 
 - `doctor` performs format fingerprinting, a complete dry run, destination checks, and a free-space check.
@@ -109,6 +121,7 @@ The app is a separate executable target over `UlyssesExporter`; the CLI remains 
 - [Real-library validation](docs/VALIDATION.md)
 - [Development and dependencies](docs/DEVELOPMENT.md)
 - [Release tool](docs/DEVELOPMENT.md#release-tool)
+- [Release checklist](docs/RELEASE_CHECKLIST.md)
 - [Mac App Store architecture and submission](docs/APP_STORE.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security and privacy](SECURITY.md)
