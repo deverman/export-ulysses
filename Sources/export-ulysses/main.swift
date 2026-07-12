@@ -42,7 +42,7 @@ struct Migrate: AsyncParsableCommand {
         abstract: "Create a new, validated FSNotes library from Ulysses."
     )
 
-    @Argument(help: "New output folder to use as FSNotes Default Storage.")
+    @Argument(help: "New output folder. Place it inside an existing FSNotes storage or use it as a new Default Storage.")
     var output: String
 
     @OptionGroup var options: BackupOptions
@@ -61,9 +61,11 @@ struct Migrate: AsyncParsableCommand {
         CLIOutput.printSummary(summary)
         print("Validation passed. Migration notes are under _Ulysses Migration; anonymous diagnostics are under hidden .export-ulysses.")
         let outputURL = URL(fileURLWithPath: destination).standardizedFileURL
-        print("In FSNotes Settings > General, set Default Storage to \(outputURL.path).")
+        print("If FSNotes already has notes, keep its current Default Storage and place this migration folder inside it.")
+        print("For a new FSNotes library, set Default Storage to \(outputURL.path).")
         if summary.trashSheets > 0 {
-            print("In FSNotes Settings > Advanced, verify Trash points to \(outputURL.appendingPathComponent("Trash").path) before using Empty Trash.")
+            print("Ulysses Trash was exported to \(outputURL.appendingPathComponent("Trash").path).")
+            print("For an existing library, move those TextBundles into FSNotes' currently configured Trash; for a new library, configure FSNotes Trash to use that folder.")
         }
     }
 }

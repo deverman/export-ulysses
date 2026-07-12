@@ -210,7 +210,7 @@ public struct Exporter: Sendable {
                 checks.append(PreflightCheck(
                     name: "FSNotes Trash",
                     status: .warning,
-                    message: "\(analysis.summary.trashSheets) Ulysses Trash sheets will be written to <output>/Trash. Select the output as FSNotes' Default Storage and verify its Trash location before using Empty Trash."
+                    message: "\(analysis.summary.trashSheets) Ulysses Trash sheets will be written to <output>/Trash. For an existing FSNotes library, move those TextBundles into its configured Trash; for a new library, configure FSNotes Trash to use that folder."
                 ))
             }
             if analysis.summary.missingMedia > 0 {
@@ -1344,9 +1344,17 @@ struct ExportReportWriter {
             "",
             "## Finish In FSNotes",
             "",
-            "1. In FSNotes Settings > General, select the export folder as Default Storage. Do not merely add it as an external folder.",
-            "2. In FSNotes Settings > Advanced, verify that Trash points to `<export folder>/Trash`, especially if FSNotes previously used a custom Trash location.",
-            "3. Restart FSNotes and confirm that Ulysses Inbox sheets appear in Inbox and \(summary.trashSheets) deleted Ulysses sheets appear in Trash.",
+            "### Existing FSNotes Library",
+            "",
+            "1. Keep the current Default Storage. With FSNotes closed, place the complete export folder inside it, or add the export as an external folder for review.",
+            "2. In FSNotes Settings > Advanced, verify the existing Trash location. Move the TextBundles inside `<export folder>/Trash` into that configured folder if you want the \(summary.trashSheets) Ulysses Trash sheets to appear in FSNotes Trash.",
+            "3. Restart FSNotes and verify the imported folder before deleting the separate export or backup.",
+            "",
+            "### New Or Empty FSNotes Library",
+            "",
+            "1. In FSNotes Settings > General, select the export folder as Default Storage.",
+            "2. In Settings > Advanced, set Trash to `<export folder>/Trash`.",
+            "3. Restart FSNotes and confirm that Ulysses Inbox sheets appear in Inbox and deleted Ulysses sheets appear in Trash.",
             "",
             "Warning: FSNotes Empty Trash permanently deletes the imported Ulysses Trash sheets.",
             "",

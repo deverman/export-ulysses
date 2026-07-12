@@ -32,7 +32,13 @@ The newest local `.ulbackup` is selected automatically. Pass `--backup "/path/to
 
 If automatic discovery reports that no backup exists, leave Ulysses open for at least five minutes or use **Backup now**, then rerun `doctor`. On another Mac or an exported backup, pass its path with `--backup`; local Ulysses backups do not sync between devices.
 
-After validation succeeds, open **FSNotes > Settings > General** and select the migration folder as **Default Storage**. Do not merely add it as an external folder. In **Settings > Advanced**, verify that Trash points to the migration folder's `Trash` directory before using Empty Trash.
+### Add The Migration To FSNotes
+
+**If you already use FSNotes, keep your current Default Storage.** The least disruptive approach is to choose that existing storage folder as the destination parent in Export Ulysses. The app creates a new `FSNotes Ulysses Migration` child folder, so imported notes stay together and FSNotes discovers them without replacing or mixing them with your existing files. If you exported elsewhere, add the migration folder as an external folder for review, or move the complete folder under your existing Default Storage while FSNotes is closed.
+
+FSNotes only treats its configured Trash folder as system Trash. To retain the Ulysses trash state in an existing library, first verify **FSNotes > Settings > Advanced > Trash**, then move the TextBundles inside the migration's `Trash` folder into that existing FSNotes Trash folder. Review them before using **Empty Trash**. Leaving them in the nested migration `Trash` folder preserves the files on disk, but FSNotes may not display them.
+
+**For a new or empty FSNotes installation**, select the migration folder as **FSNotes > Settings > General > Default Storage**, then set **Settings > Advanced > Trash** to its `Trash` subfolder. This gives migrated Ulysses Inbox and Trash sheets native FSNotes Inbox and Trash behavior.
 
 ## What Is Preserved
 
@@ -43,8 +49,8 @@ After validation succeeds, open **FSNotes > Settings > General** and select the 
 | Sidebar notes, comments, annotations | Visible Markdown sections or markers |
 | Keywords | Searchable hashtags |
 | Groups and projects | FSNotes folders with deterministic collision handling |
-| Inbox | Root of FSNotes Default Storage |
-| Trash | Flattened into FSNotes `Trash/`; original hierarchy stays in the manifest |
+| Inbox | Root when used as a new Default Storage; contained in the migration folder when added to an existing library |
+| Trash | Exported to `Trash/`; use it as the new library's Trash or move its contents into an existing library's configured Trash |
 | Archive and Templates | Folders plus `#ulysses/archive` and `#ulysses/template` |
 | Material, glued, favorite status | `#ulysses/material`, `#ulysses/glued`, and `#ulysses/favorite` |
 | Sheet order and glued clusters | Consolidated `Ulysses Library Map` with FSNotes links |

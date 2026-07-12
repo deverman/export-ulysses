@@ -7,7 +7,7 @@ struct CompletionSection: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Finish in FSNotes")
                 .font(.headline)
-            Text("Set the exported folder as FSNotes Default Storage, then verify that FSNotes Trash points to its Trash subfolder before emptying Trash.")
+            Text("Already use FSNotes? Keep its current Default Storage and place this migration folder inside it. For a new library, use the migration folder as Default Storage. Review the export report before configuring or moving Trash.")
                 .foregroundStyle(.secondary)
 
             HStack {

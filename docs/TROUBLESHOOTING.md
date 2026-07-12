@@ -8,7 +8,13 @@
 4. Choose a new empty destination with enough free disk space.
 5. Run `export-ulysses doctor --output "/your/new/folder"`.
 
-## FSNotes Shows No Inbox Or Trash
+## Add To An Existing FSNotes Library
+
+Do not replace Default Storage. Choose the existing FSNotes Default Storage as the destination parent so the exporter creates a new `FSNotes Ulysses Migration` folder inside it. If the migration was created elsewhere, add it as an external folder for review or move the complete folder under Default Storage while FSNotes is closed.
+
+An external folder does not acquire native Inbox or Trash semantics. To preserve Ulysses Trash state, verify the existing Trash path under **FSNotes > Settings > Advanced**, then move the TextBundles from `<export root>/Trash` into that configured Trash folder. Back up both locations first.
+
+## A New FSNotes Library Shows No Inbox Or Trash
 
 Select the export root as **FSNotes > Settings > General > Default Storage**. Adding it as an external folder does not give root notes Inbox semantics. Verify **Settings > Advanced > Trash** points to `<export root>/Trash`, then restart FSNotes.
 
@@ -42,4 +48,4 @@ Open Ulysses and choose **Ulysses > Settings > Backup > Backup now**, then rerun
 
 ## Reporting A Problem
 
-Run `export-ulysses --version` and `export-ulysses doctor`. Attach only `.export-ulysses/ulysses-export-report.json` or the JSON printed by doctor. State whether the export root is FSNotes Default Storage and whether its Trash path was verified.
+Run `export-ulysses --version` and `export-ulysses doctor`. Attach only `.export-ulysses/ulysses-export-report.json` or the JSON printed by doctor. State whether the export is inside Default Storage, configured as Default Storage, or added as an external folder, and whether its Trash contents were integrated.
