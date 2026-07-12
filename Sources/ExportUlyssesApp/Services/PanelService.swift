@@ -9,16 +9,31 @@ enum PanelService {
     }
 
     static func chooseBackup() -> URL? {
-        let panel = NSOpenPanel()
-        panel.title = "Choose a Ulysses Backup"
-        panel.message = "Select a .ulbackup package. In Ulysses, use File > Browse Backups and Reveal in Finder to locate one."
-        panel.prompt = "Choose Backup"
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.allowsMultipleSelection = false
-        panel.treatsFilePackagesAsDirectories = false
-        panel.allowedContentTypes = [UTType(filenameExtension: "ulbackup") ?? .package]
-        return panel.runModal() == .OK ? panel.url : nil
+        while true {
+            let panel = NSOpenPanel()
+            panel.title = "Choose a Ulysses Backup"
+            panel.message = "Select a .ulbackup package. In Ulysses, use File > Browse Backups and Reveal in Finder to locate one."
+            panel.prompt = "Choose Backup"
+            panel.canChooseDirectories = false
+            panel.canChooseFiles = true
+            panel.allowsMultipleSelection = false
+            panel.treatsFilePackagesAsDirectories = false
+
+            // Ulysses' package type is not registered consistently outside its process.
+            // Filtering by a synthesized UTType disables valid .ulbackup packages.
+            guard panel.runModal() == .OK, let url = panel.url else { return nil }
+            if url.pathExtension.caseInsensitiveCompare("ulbackup") == .orderedSame {
+                return url
+            }
+
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "That is not a Ulysses backup"
+            alert.informativeText = "Choose a package whose name ends in .ulbackup."
+            alert.addButton(withTitle: "Choose Again")
+            alert.addButton(withTitle: "Cancel")
+            if alert.runModal() != .alertFirstButtonReturn { return nil }
+        }
     }
 
     static func chooseDestination() -> DestinationSelection? {
