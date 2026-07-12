@@ -7,9 +7,14 @@ on:
         description: Version without the v prefix
         required: true
         type: string
+      prerelease:
+        description: Publish as a GitHub prerelease
+        required: true
+        default: true
+        type: boolean
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: signed-release-${{ inputs.version }}
@@ -66,7 +71,7 @@ jobs:
           test -n "$APPLE_APP_PASSWORD"
       - name: Install signing certificate
         run: |
-          echo "$CERTIFICATE_BASE64" | base64 --decode > certificate.p12
+          printf '%s' "$CERTIFICATE_BASE64" | base64 --decode > certificate.p12
           security create-keychain -p "$KEYCHAIN_PASSWORD" release.keychain-db
           security set-keychain-settings -lut 21600 release.keychain-db
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" release.keychain-db
@@ -75,9 +80,49 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" release.keychain-db
       - name: Build, sign, notarize, and checksum
         run: swift run -c release release-tool package "$VERSION" "$ARCH"
-      - name: Create GitHub release and upload assets
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Upload validated release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove signing material
+        if: always()
         run: |
-          gh release view "v$VERSION" >/dev/null 2>&1 || gh release create "v$VERSION" --title "export-ulysses $VERSION" --generate-notes
-          gh release upload "v$VERSION" dist/* --clobber
+          rm -f certificate.p12
+          security delete-keychain release.keychain-db || true
+
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+      PRERELEASE: ${{ inputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download both architecture artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Verify complete artifact set
+        run: |
+          test -f "dist/export-ulysses-$VERSION-macos26-arm64.zip"
+          test -f "dist/export-ulysses-$VERSION-macos26-arm64.zip.sha256"
+          test -f "dist/export-ulysses-$VERSION-macos26-x86_64.zip"
+          test -f "dist/export-ulysses-$VERSION-macos26-x86_64.zip.sha256"
+          (cd dist && sha256sum -c "export-ulysses-$VERSION-macos26-arm64.zip.sha256")
+          (cd dist && sha256sum -c "export-ulysses-$VERSION-macos26-x86_64.zip.sha256")
+      - name: Publish GitHub release once
+        run: |
+          args=("v$VERSION" --title "export-ulysses $VERSION" --generate-notes)
+          if [[ "$PRERELEASE" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+          gh release create "${args[@]}" dist/*

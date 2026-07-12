@@ -20,7 +20,7 @@ The **Signed Release** workflow needs these repository Actions secrets:
 - `APPLE_TEAM_ID`: Apple Developer team identifier.
 - `APPLE_APP_PASSWORD`: app-specific password for notarization.
 
-The workflow validates the package before building ARM64 and Intel artifacts. Each artifact is signed, notarized, stapled, zipped, checksummed, and uploaded to the matching GitHub release.
+The workflow validates the package before building ARM64 and Intel artifacts. Each artifact is signed, notarized, stapled, zipped, and checksummed. Publishing runs only after both architecture jobs succeed and both checksums verify, preventing a partial GitHub release. Keep **Publish as a GitHub prerelease** selected for the public beta.
 
 ## Clean Installation
 
