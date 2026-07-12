@@ -40,6 +40,19 @@ struct LocationSection: View {
                 }
             }
 
+            HStack(spacing: 8) {
+                Rectangle()
+                    .fill(.quaternary)
+                    .frame(height: 1)
+                Image(systemName: "arrow.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                Rectangle()
+                    .fill(.quaternary)
+                    .frame(height: 1)
+            }
+            .padding(.horizontal, 42)
+
             LocationRow(
                 title: "FSNotes destination",
                 icon: "folder",
@@ -48,7 +61,7 @@ struct LocationSection: View {
                 action: store.chooseDestination
             )
 
-            Label("External Folders are not included in Ulysses backups and must be copied separately.", systemImage: "exclamationmark.circle")
+            Label("External Folders are not included in Ulysses backups and must be copied separately.", systemImage: "info.circle")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
@@ -73,23 +86,28 @@ private struct LocationRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .foregroundStyle(.secondary)
-                .frame(width: 20)
+                .font(.title3)
+                .foregroundStyle(path.isEmpty ? Color.secondary : Color.accentColor)
+                .frame(width: 28)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.subheadline.weight(.medium))
                 Text(path.isEmpty ? placeholder : path)
                     .font(.callout)
                     .foregroundStyle(path.isEmpty ? .orange : .secondary)
-                    .lineLimit(2)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                     .textSelection(.enabled)
             }
             Spacer(minLength: 12)
             Button(action: action) {
-                Image(systemName: "folder.badge.plus")
+                Label(path.isEmpty ? "Choose" : "Change", systemImage: "folder")
             }
+            .buttonStyle(.bordered)
             .help("Choose \(title.lowercased())")
         }
-        .padding(.vertical, 4)
+        .padding(14)
+        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .contain)
     }
 }

@@ -11,14 +11,20 @@ struct CompletionSection: View {
                 .foregroundStyle(.secondary)
 
             HStack {
-                Button("Show Export in Finder") {
+                Button("Show Export in Finder", systemImage: "folder") {
                     store.revealExport()
                 }
-                Button("Open FSNotes") {
+                Button("Open FSNotes", systemImage: "arrow.up.forward.app") {
                     store.openFSNotes()
                 }
                 .buttonStyle(.borderedProminent)
             }
+        }
+        .padding(16)
+        .background(.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.green.opacity(0.2))
         }
     }
 }

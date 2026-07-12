@@ -23,6 +23,7 @@ struct PreflightSection: View {
                             .textSelection(.enabled)
                     }
                 }
+                .padding(.vertical, 2)
             }
         }
     }
@@ -60,6 +61,9 @@ struct ProgressSection: View {
                 }
             }
             ProgressView(value: progress.fraction)
+                .progressViewStyle(.linear)
         }
+        .padding(16)
+        .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
     }
 }
