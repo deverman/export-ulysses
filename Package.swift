@@ -11,7 +11,8 @@ let package = Package(
     products: [
         .library(name: "UlyssesExporter", targets: ["UlyssesExporter"]),
         .executable(name: "export-ulysses", targets: ["export-ulysses"]),
-        .executable(name: "ExportUlyssesApp", targets: ["ExportUlyssesApp"])
+        .executable(name: "ExportUlyssesApp", targets: ["ExportUlyssesApp"]),
+        .executable(name: "release-tool", targets: ["release-tool"])
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.8.2")
@@ -27,6 +28,12 @@ let package = Package(
             dependencies: ["UlyssesExporter"],
             path: "Sources/ExportUlyssesApp"
         ),
-        .testTarget(name: "UlyssesExporterTests", dependencies: ["UlyssesExporter"])
+        .target(name: "ReleaseToolKit"),
+        .executableTarget(name: "release-tool", dependencies: [
+            "ReleaseToolKit",
+            .product(name: "ArgumentParser", package: "swift-argument-parser")
+        ]),
+        .testTarget(name: "UlyssesExporterTests", dependencies: ["UlyssesExporter"]),
+        .testTarget(name: "ReleaseToolKitTests", dependencies: ["ReleaseToolKit"])
     ]
 )

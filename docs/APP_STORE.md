@@ -42,7 +42,7 @@ Open `ExportUlysses.xcodeproj`, select **Any Mac**, then choose **Product > Arch
 The equivalent archive helper is:
 
 ```sh
-DEVELOPMENT_TEAM=YOURTEAMID Scripts/archive-app-store.sh 1.0.0 1
+DEVELOPMENT_TEAM=YOURTEAMID swift run -c release release-tool archive-app-store 1.0.0 1
 ```
 
 The helper opens the resulting archive in Organizer. Signing, validation, and upload remain under Xcode and App Store Connect rather than introducing App Store credentials into this repository.

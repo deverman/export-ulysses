@@ -102,6 +102,7 @@ The app is a separate executable target over `UlyssesExporter`; the CLI remains 
 - [Compatibility policy](docs/COMPATIBILITY.md)
 - [Real-library validation](docs/VALIDATION.md)
 - [Development and dependencies](docs/DEVELOPMENT.md)
+- [Release tool](docs/DEVELOPMENT.md#release-tool)
 - [Mac App Store architecture and submission](docs/APP_STORE.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security and privacy](SECURITY.md)

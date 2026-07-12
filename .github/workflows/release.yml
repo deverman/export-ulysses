@@ -53,7 +53,7 @@ jobs:
           security list-keychain -d user -s release.keychain-db
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" release.keychain-db
       - name: Build, sign, notarize, and checksum
-        run: Scripts/package-release.sh "$VERSION" "$ARCH"
+        run: swift run -c release release-tool package "$VERSION" "$ARCH"
       - name: Create GitHub release and upload assets
         env:
           GH_TOKEN: ${{ github.token }}
