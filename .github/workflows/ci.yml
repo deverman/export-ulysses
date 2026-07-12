@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, macos-26-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: swift --version
+      - name: Resolve dependencies
+        run: swift package resolve
+      - name: Verify tracked App Store project
+        run: test -f ExportUlysses.xcodeproj/project.pbxproj
+      - name: Build release
+        run: swift build -c release
+      - name: Build App Store target
+        run: >-
+          xcodebuild -project ExportUlysses.xcodeproj -scheme "Export Ulysses"
+          -configuration Debug -destination "platform=macOS"
+          CODE_SIGNING_ALLOWED=NO build
+      - name: Test
+        run: swift test
+      - name: Check formatting damage
+        run: git diff --check

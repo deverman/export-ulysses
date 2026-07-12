@@ -1,9 +1,16 @@
 .DS_Store
 /.build
 /Packages
-/*.xcodeproj
+/*.xcodeproj/xcuserdata/
+/*.xcodeproj/project.xcworkspace/xcuserdata/
+/*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
 # Playgrounds
 timeline.xctimeline
 playground.xcworkspace
 .swiftpm
+
+# Default local export output
+/FSNotesImport
+/dist
+/certificate.p12

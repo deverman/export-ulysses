@@ -1,0 +1,53 @@
+name: Migration problem
+description: Report an export, validation, or FSNotes behavior problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not attach a Ulysses backup, private manifest, or visible migration report. Attach only the anonymous support JSON after reviewing it.
+  - type: input
+    id: version
+    attributes:
+      label: Exporter version
+      description: Output of `export-ulysses --version`
+    validations:
+      required: true
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Failure stage
+      options:
+        - doctor or format check
+        - migration or validation
+        - FSNotes setup or display
+        - missing content or media
+    validations:
+      required: true
+  - type: checkboxes
+    id: setup
+    attributes:
+      label: FSNotes setup
+      options:
+        - label: I kept my existing Default Storage, or intentionally selected the export as a new Default Storage.
+        - label: I reviewed the existing-library and new-library instructions before integrating Trash.
+        - label: I exported Ulysses External Folders separately.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Include the exact error, expected behavior, and reproduction steps without note content.
+    validations:
+      required: true
+  - type: textarea
+    id: support
+    attributes:
+      label: Anonymous support JSON
+      description: Paste or attach `.export-ulysses/ulysses-export-report.json` only after reviewing it.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I reviewed the attachment and did not include my backup, private manifest, note text, titles, filenames, URLs, or paths.
+          required: true
