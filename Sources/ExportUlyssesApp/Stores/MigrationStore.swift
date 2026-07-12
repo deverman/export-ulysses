@@ -13,6 +13,12 @@ final class MigrationStore {
     var supportJSON = ""
     var progress = MigrationProgress()
     var errorMessage: String?
+    private var backupAccess: SecurityScopedAccess?
+    private var destinationAccess: SecurityScopedAccess?
+
+    var supportsAutomaticBackupDiscovery: Bool {
+        AppDistribution.supportsAutomaticBackupDiscovery
+    }
 
     var isWorking: Bool {
         phase == .checking || phase == .migrating
@@ -29,10 +35,15 @@ final class MigrationStore {
     init() {
         destinationPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Documents/FSNotes Ulysses Migration", isDirectory: true).path
-        discoverBackup()
+        if AppDistribution.isAppStore {
+            restoreAppStoreSelections()
+        } else {
+            discoverBackup()
+        }
     }
 
     func discoverBackup() {
+        guard supportsAutomaticBackupDiscovery else { return }
         do {
             backupPath = try UlyssesBackupLocator().newestBackup().path
             resetResults()
@@ -44,13 +55,21 @@ final class MigrationStore {
 
     func chooseBackup() {
         guard let url = PanelService.chooseBackup() else { return }
+        backupAccess = SecurityScopedAccess(url: url)
+        if AppDistribution.isAppStore {
+            try? SecurityScopedBookmarkStore.save(url, key: .backup, readOnly: true)
+        }
         backupPath = url.path
         resetResults()
     }
 
     func chooseDestination() {
-        guard let url = PanelService.chooseDestination() else { return }
-        destinationPath = url.path
+        guard let selection = PanelService.chooseDestination() else { return }
+        destinationAccess = SecurityScopedAccess(url: selection.parent)
+        if AppDistribution.isAppStore {
+            try? SecurityScopedBookmarkStore.save(selection.parent, key: .destinationParent, readOnly: false)
+        }
+        destinationPath = selection.destination.path
         resetResults()
     }
 
@@ -117,6 +136,17 @@ final class MigrationStore {
         WorkspaceService.openFullDiskAccess()
     }
 
+    func useSampleBackup() {
+        do {
+            backupAccess = nil
+            backupPath = try SampleBackupFactory.create().path
+            resetResults()
+        } catch {
+            errorMessage = error.localizedDescription
+            phase = .failed
+        }
+    }
+
     func saveSupportReport() {
         guard !supportJSON.isEmpty else { return }
         do {
@@ -146,5 +176,21 @@ final class MigrationStore {
         supportJSON = ""
         errorMessage = nil
         progress = MigrationProgress()
+    }
+
+    private func restoreAppStoreSelections() {
+        if let backup = SecurityScopedBookmarkStore.restore(.backup) {
+            backupAccess = SecurityScopedAccess(url: backup)
+            backupPath = backup.path
+        } else {
+            backupPath = ""
+        }
+        if let parent = SecurityScopedBookmarkStore.restore(.destinationParent) {
+            destinationAccess = SecurityScopedAccess(url: parent)
+            destinationPath = parent.appendingPathComponent("FSNotes Ulysses Migration", isDirectory: true).path
+        } else {
+            destinationPath = ""
+        }
+        resetResults()
     }
 }

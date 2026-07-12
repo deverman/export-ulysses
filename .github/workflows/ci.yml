@@ -22,6 +22,11 @@ jobs:
         run: swift package resolve
       - name: Build release
         run: swift build -c release
+      - name: Build App Store target
+        run: >-
+          xcodebuild -project ExportUlysses.xcodeproj -scheme "Export Ulysses"
+          -configuration Debug -destination "platform=macOS"
+          CODE_SIGNING_ALLOWED=NO build
       - name: Test
         run: swift test
       - name: Check formatting damage

@@ -102,7 +102,10 @@ The app is a separate executable target over `UlyssesExporter`; the CLI remains 
 - [Compatibility policy](docs/COMPATIBILITY.md)
 - [Real-library validation](docs/VALIDATION.md)
 - [Development and dependencies](docs/DEVELOPMENT.md)
+- [Mac App Store architecture and submission](docs/APP_STORE.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security and privacy](SECURITY.md)
 
 When filing an issue, attach only `.export-ulysses/ulysses-export-report.json` unless a maintainer specifically requests privately reviewed evidence.
+
+Export Ulysses is an independent migration utility and is not affiliated with the developers of Ulysses or FSNotes. Product names and trademarks belong to their respective owners.

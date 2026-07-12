@@ -3,10 +3,15 @@ import UniformTypeIdentifiers
 
 @MainActor
 enum PanelService {
+    struct DestinationSelection {
+        let destination: URL
+        let parent: URL
+    }
+
     static func chooseBackup() -> URL? {
         let panel = NSOpenPanel()
         panel.title = "Choose a Ulysses Backup"
-        panel.message = "Select a .ulbackup package exported or created by Ulysses."
+        panel.message = "Select a .ulbackup package. In Ulysses, use File > Browse Backups and Reveal in Finder to locate one."
         panel.prompt = "Choose Backup"
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
@@ -16,7 +21,7 @@ enum PanelService {
         return panel.runModal() == .OK ? panel.url : nil
     }
 
-    static func chooseDestination() -> URL? {
+    static func chooseDestination() -> DestinationSelection? {
         let panel = NSOpenPanel()
         panel.title = "Choose the Parent Folder"
         panel.message = "A new FSNotes Ulysses Migration folder will be created here."
@@ -26,7 +31,10 @@ enum PanelService {
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let parent = panel.url else { return nil }
-        return parent.appendingPathComponent("FSNotes Ulysses Migration", isDirectory: true)
+        return DestinationSelection(
+            destination: parent.appendingPathComponent("FSNotes Ulysses Migration", isDirectory: true),
+            parent: parent
+        )
     }
 
     static func saveSupportReport(_ report: String) throws {

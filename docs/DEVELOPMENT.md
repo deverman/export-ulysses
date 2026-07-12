@@ -21,5 +21,6 @@ Architecture boundaries:
 - `OutputValidation.swift`: staging transaction and final TextBundle validation
 - `main.swift`: two-command CLI only
 - `Sources/ExportUlyssesApp`: SwiftUI presentation, native panels, progress, and FSNotes launch actions; no migration parsing or writing logic
+- `ExportUlysses.xcodeproj`: sandboxed `APP_STORE` target and shared archive scheme; links the local `UlyssesExporter` package product
 
 Do not weaken a compatibility gate to accommodate a new fixture. Add a versioned reader or expand the Ulysses 40 contract only with evidence from that exact version.

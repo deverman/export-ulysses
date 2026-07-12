@@ -25,7 +25,8 @@ xattr -cr "dist/$name"
 if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
   codesign --force --options runtime --timestamp --sign "$CODESIGN_IDENTITY" "dist/$name/export-ulysses"
   codesign --verify --strict --verbose=2 "dist/$name/export-ulysses"
-  codesign --force --options runtime --timestamp --sign "$CODESIGN_IDENTITY" "dist/$name/$app_name"
+  codesign --force --options runtime --timestamp --sign "$CODESIGN_IDENTITY" \
+    --entitlements Packaging/Direct.entitlements "dist/$name/$app_name"
   codesign --verify --deep --strict --verbose=2 "dist/$name/$app_name"
 fi
 

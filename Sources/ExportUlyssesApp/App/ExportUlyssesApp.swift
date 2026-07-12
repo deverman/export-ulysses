@@ -23,5 +23,9 @@ struct ExportUlyssesApp: App {
                 .keyboardShortcut("o", modifiers: [.command, .shift])
             }
         }
+
+        Settings {
+            PrivacyView()
+        }
     }
 }

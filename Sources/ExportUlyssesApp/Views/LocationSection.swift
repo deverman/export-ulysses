@@ -18,20 +18,25 @@ struct LocationSection: View {
 
             if store.backupPath.isEmpty {
                 Label {
-                    Text("No readable local backup was found. In Ulysses choose **Settings > Backup > Backup now**, then check again. If a backup already exists, grant this app Full Disk Access.")
+                    Text(missingBackupMessage)
                 } icon: {
                     Image(systemName: "archivebox.badge.clock")
                 }
                 .font(.callout)
                 .foregroundStyle(.orange)
 
-                HStack {
-                    Button("Check Again", systemImage: "arrow.clockwise") {
-                        store.discoverBackup()
+                if store.supportsAutomaticBackupDiscovery {
+                    HStack {
+                        Button("Check Again", systemImage: "arrow.clockwise") {
+                            store.discoverBackup()
+                        }
+                        Button("Full Disk Access", systemImage: "lock.open") {
+                            store.openFullDiskAccess()
+                        }
                     }
-                    Button("Full Disk Access", systemImage: "lock.open") {
-                        store.openFullDiskAccess()
-                    }
+                }
+                Button("Try Sample Backup", systemImage: "doc.badge.gearshape") {
+                    store.useSampleBackup()
                 }
             }
 
@@ -46,6 +51,14 @@ struct LocationSection: View {
             Label("External Folders are not included in Ulysses backups and must be copied separately.", systemImage: "exclamationmark.circle")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var missingBackupMessage: String {
+        if store.supportsAutomaticBackupDiscovery {
+            "No readable local backup was found. In Ulysses choose Settings > Backup > Backup now, then check again. If a backup already exists, grant this app Full Disk Access."
+        } else {
+            "Choose a Ulysses .ulbackup package. App Store privacy protections require you to select the backup explicitly."
         }
     }
 }
