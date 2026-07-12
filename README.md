@@ -109,7 +109,7 @@ The companion folder contains at most these five notes:
 - If the backup path cannot be read, grant Full Disk Access to Terminal, iTerm, or the app running this command.
 - If FSNotes preview does not show an image, check whether the image appears in `assets/` and whether the Markdown link starts with `assets/`.
 - Duplicate Ulysses titles are preserved as separate TextBundles with numeric suffixes. The report counts how many were renamed.
-- Same-named Ulysses groups remain separate. The actual Ulysses Archive keeps `Archive`; an unrelated conflicting group receives a stable suffix such as `Archive [671ab37b]`.
+- The special Ulysses archive is exported as `Archive (Ulysses)`, so an ordinary user-created group named `Archive` can keep its natural name. Opaque source IDs remain only in the hidden manifest.
 - If the output-folder check fails, choose a new empty folder. The exporter intentionally does not append to or overwrite an earlier migration.
 - Missing media references are preserved as report entries with the affected note title and reference. Bare filenames usually mean an imported/local image was never stored in the Ulysses package. Mobile `file://` references usually point to transient iOS app storage and cannot be recovered from a Ulysses backup.
 - The support report intentionally excludes note text. Share `.export-ulysses/ulysses-export-report.json` when filing a bug, not your Ulysses backup.

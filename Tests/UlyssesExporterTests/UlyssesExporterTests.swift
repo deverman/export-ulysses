@@ -97,7 +97,7 @@ final class UlyssesExporterTests: XCTestCase {
 
         XCTAssertEqual(summary.sheets, 1)
         XCTAssertEqual(summary.materialSheets, 1)
-        let bundle = output.appendingPathComponent("Archive/Content/Archived Material.textbundle")
+        let bundle = output.appendingPathComponent("Archive (Ulysses)/Content/Archived Material.textbundle")
         let markdown = try String(contentsOf: bundle.appendingPathComponent("text.markdown"), encoding: .utf8)
         XCTAssertTrue(markdown.contains("## Ulysses Migration Tags"))
         XCTAssertTrue(markdown.contains("#ulysses/material #ulysses/archive"))
@@ -276,7 +276,7 @@ final class UlyssesExporterTests: XCTestCase {
         XCTAssertEqual(summary.metadataNotes, 1)
 
         let templateMarkdown = try String(
-            contentsOf: output.appendingPathComponent("Archive/Content/Templates/Reusable Draft.textbundle/text.markdown"),
+            contentsOf: output.appendingPathComponent("Archive (Ulysses)/Content/Templates/Reusable Draft.textbundle/text.markdown"),
             encoding: .utf8
         )
         XCTAssertTrue(templateMarkdown.contains("#ulysses/favorite"))
@@ -293,7 +293,7 @@ final class UlyssesExporterTests: XCTestCase {
             contentsOf: output.appendingPathComponent("_Ulysses Migration/Ulysses Group Metadata.textbundle/text.markdown"),
             encoding: .utf8
         )
-        XCTAssertTrue(metadataMarkdown.contains("## Ulysses Metadata: Archive / Content / Templates"))
+        XCTAssertTrue(metadataMarkdown.contains("## Ulysses Metadata: Archive (Ulysses) / Content / Templates"))
         XCTAssertTrue(metadataMarkdown.contains("#ulysses/group-metadata"))
         XCTAssertTrue(metadataMarkdown.contains("#ulysses/template"))
         XCTAssertTrue(metadataMarkdown.contains("- Ulysses icon: Material"))
@@ -313,7 +313,7 @@ final class UlyssesExporterTests: XCTestCase {
         XCTAssertEqual(counts["favoriteSheets"] as? Int, 1)
         XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent(".export-ulysses/manifest.json").path))
 
-        let infoData = try Data(contentsOf: output.appendingPathComponent("Archive/Content/Templates/Reusable Draft.textbundle/info.json"))
+        let infoData = try Data(contentsOf: output.appendingPathComponent("Archive (Ulysses)/Content/Templates/Reusable Draft.textbundle/info.json"))
         let info = try JSONSerialization.jsonObject(with: infoData) as? [String: Any]
         XCTAssertEqual(info?["version"] as? Int, 2)
         XCTAssertEqual(info?["type"] as? String, "net.daringfireball.markdown")

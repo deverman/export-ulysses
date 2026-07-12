@@ -826,10 +826,13 @@ struct GroupPathResolver: Sendable, Equatable {
             }
             identitiesBySourceGroup[sourceKey] = identities
             for (depth, identity) in identities.enumerated() {
+                let displayName = depth == 0 && isUlyssesArchive(url: groupURL, groupPath: groupPath)
+                    ? "Archive (Ulysses)"
+                    : sanitizedFileName(groupPath[depth])
                 nodesByIdentity[identity] = GroupNode(
                     identity: identity,
                     parentIdentity: depth == 0 ? nil : identities[depth - 1],
-                    displayName: sanitizedFileName(groupPath[depth]),
+                    displayName: displayName,
                     depth: depth
                 )
             }
