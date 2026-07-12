@@ -98,26 +98,32 @@ public struct PreflightCheck: Sendable, Equatable {
     public let message: String
 }
 
+public struct ExportProgress: Sendable, Equatable {
+    public let phase: String
+    public let completed: Int
+    public let total: Int
+}
+
 public struct Exporter {
     private let verbose: Bool
     private let maxConcurrentExports: Int
+    private let progress: (@Sendable (ExportProgress) -> Void)?
 
-    public init(verbose: Bool = false, maxConcurrentExports: Int = 2) {
+    public init(
+        verbose: Bool = false,
+        maxConcurrentExports: Int = 2,
+        progress: (@Sendable (ExportProgress) -> Void)? = nil
+    ) {
         self.verbose = verbose
         self.maxConcurrentExports = max(1, maxConcurrentExports)
+        self.progress = progress
     }
 
-    public func run(input: String, output: String, keepGroups: Bool, ignoring ignoredGroups: [String], commandLine: [String] = []) async throws -> ExportSummary {
+    public func run(input: String, output: String, allowUnknownFormat: Bool = false, commandLine: [String] = []) async throws -> ExportSummary {
         let inputURL = URL(fileURLWithPath: input)
         let outputURL = URL(fileURLWithPath: output)
         try requireEmptyOutput(outputURL)
-        try FileManager.default.createDirectory(at: outputURL, withIntermediateDirectories: true)
-
-        let snapshot = try UlyssesBackupReader().readLibrary(
-            in: inputURL,
-            keepGroups: keepGroups,
-            ignoring: Set(ignoredGroups)
-        )
+        let snapshot = try readSnapshot(inputURL, allowUnknownFormat: allowUnknownFormat)
         let sheets = snapshot.sheets
 
         guard !sheets.isEmpty else {
@@ -130,28 +136,28 @@ public struct Exporter {
 
         let mediaIndex = MediaIndex(sheets: sheets)
         let sheetOrderIndex = SheetOrderIndex(sheets: sheets)
-        let groupPathResolver = GroupPathResolver(sheets: sheets, groups: snapshot.groups)
-        return try await export(snapshot, to: outputURL, mediaIndex: mediaIndex, sheetOrderIndex: sheetOrderIndex, groupPathResolver: groupPathResolver, commandLine: commandLine)
+        let groupPathResolver = MigrationLayout(sheets: sheets, groups: snapshot.groups)
+        return try await OutputTransaction(destination: outputURL).perform({ stagingURL in
+            try await export(snapshot, to: stagingURL, mediaIndex: mediaIndex, sheetOrderIndex: sheetOrderIndex, groupPathResolver: groupPathResolver, commandLine: commandLine)
+        }, validate: { stagingURL, summary in
+            try OutputValidator().validate(root: stagingURL, summary: summary, snapshot: snapshot)
+        })
     }
 
-    public func analyze(input: String, keepGroups: Bool, ignoring ignoredGroups: [String], commandLine: [String] = []) async throws -> ExportAnalysis {
+    public func analyze(input: String, allowUnknownFormat: Bool = false, commandLine: [String] = []) async throws -> ExportAnalysis {
         let inputURL = URL(fileURLWithPath: input)
-        let snapshot = try UlyssesBackupReader().readLibrary(
-            in: inputURL,
-            keepGroups: keepGroups,
-            ignoring: Set(ignoredGroups)
-        )
+        let snapshot = try readSnapshot(inputURL, allowUnknownFormat: allowUnknownFormat)
         guard !snapshot.sheets.isEmpty else {
             throw ExportError.noSheetsFound(inputURL.path)
         }
 
         let mediaIndex = MediaIndex(sheets: snapshot.sheets)
         let sheetOrderIndex = SheetOrderIndex(sheets: snapshot.sheets)
-        let groupPathResolver = GroupPathResolver(sheets: snapshot.sheets, groups: snapshot.groups)
+        let groupPathResolver = MigrationLayout(sheets: snapshot.sheets, groups: snapshot.groups)
         return try await analyze(snapshot, mediaIndex: mediaIndex, sheetOrderIndex: sheetOrderIndex, groupPathResolver: groupPathResolver, commandLine: commandLine)
     }
 
-    public func doctor(input: String, output: String?, keepGroups: Bool, ignoring ignoredGroups: [String], commandLine: [String] = []) async -> PreflightResult {
+    public func doctor(input: String, output: String?, allowUnknownFormat: Bool = false, commandLine: [String] = []) async -> PreflightResult {
         let inputURL = URL(fileURLWithPath: input)
         var checks: [PreflightCheck] = []
 
@@ -172,14 +178,33 @@ public struct Exporter {
             checks.append(PreflightCheck(name: "Backup type", status: .warning, message: "Input is readable, but it does not end in .ulbackup."))
         }
 
+        checks.append(PreflightCheck(
+            name: "External Folders",
+            status: .warning,
+            message: "Ulysses backups do not include External Folders. Export or copy those folders separately before leaving Ulysses."
+        ))
+
         if let output {
-            checks.append(outputCheck(for: URL(fileURLWithPath: output)))
+            let outputURL = URL(fileURLWithPath: output)
+            checks.append(outputCheck(for: outputURL, inputURL: inputURL))
+            checks.append(capacityCheck(inputURL: inputURL, outputURL: outputURL))
         } else {
             checks.append(PreflightCheck(name: "Output folder", status: .warning, message: "No output folder was provided; doctor can only validate the input and dry-run analysis."))
         }
 
         do {
-            let analysis = try await analyze(input: input, keepGroups: keepGroups, ignoring: ignoredGroups, commandLine: commandLine)
+            let analysis = try await analyze(input: input, allowUnknownFormat: allowUnknownFormat, commandLine: commandLine)
+            let compatibility = try Ulysses40BackupReader().readLibrary(in: inputURL).compatibility
+            checks.append(PreflightCheck(
+                name: "Ulysses format",
+                status: compatibility.verified ? .success : .warning,
+                message: compatibility.verified
+                    ? "Verified against \(compatibility.formatName)."
+                    : "Unverified format accepted only because --allow-unknown-format was supplied."
+            ))
+            for warning in compatibility.warnings {
+                checks.append(PreflightCheck(name: "Format metadata", status: .warning, message: warning))
+            }
             checks.append(PreflightCheck(name: "Sheet discovery", status: .success, message: "Found \(analysis.summary.sheets) sheets."))
             if analysis.summary.trashSheets > 0 {
                 checks.append(PreflightCheck(
@@ -205,16 +230,24 @@ public struct Exporter {
         }
     }
 
-    private func export(_ snapshot: UlyssesLibrarySnapshot, to outputURL: URL, mediaIndex: MediaIndex, sheetOrderIndex: SheetOrderIndex, groupPathResolver: GroupPathResolver, commandLine: [String]) async throws -> ExportSummary {
+    private func readSnapshot(_ inputURL: URL, allowUnknownFormat: Bool) throws -> UlyssesLibrarySnapshot {
+        let snapshot = try Ulysses40BackupReader().readLibrary(in: inputURL)
+        guard snapshot.compatibility.verified || allowUnknownFormat else {
+            throw ExportError.unverifiedFormat(snapshot.compatibility.errors)
+        }
+        return snapshot
+    }
+
+    private func export(_ snapshot: UlyssesLibrarySnapshot, to outputURL: URL, mediaIndex: MediaIndex, sheetOrderIndex: SheetOrderIndex, groupPathResolver: MigrationLayout, commandLine: [String]) async throws -> ExportSummary {
         let sheetExporter = SheetExporter(
             mediaIndex: mediaIndex,
             sheetOrderIndex: sheetOrderIndex,
             favoriteSheetPaths: snapshot.favoriteSheetPaths,
             groupPathResolver: groupPathResolver
         )
-        let prepared = try await process(snapshot.sheets) { try sheetExporter.prepare($0) }
+        let prepared = try await process(snapshot.sheets, phase: "Parsing sheets") { try sheetExporter.prepare($0) }
         let names = OutputNameResolver(prepared: prepared, groupPaths: groupPathResolver)
-        let results = try await process(prepared) { item in
+        let results = try await process(prepared, phase: "Writing TextBundles") { item in
             try sheetExporter.export(item, named: names.name(for: item.source), to: outputURL)
         }
         var (summary, orderEntries) = aggregate(results)
@@ -241,14 +274,14 @@ public struct Exporter {
         return summary
     }
 
-    private func analyze(_ snapshot: UlyssesLibrarySnapshot, mediaIndex: MediaIndex, sheetOrderIndex: SheetOrderIndex, groupPathResolver: GroupPathResolver, commandLine: [String]) async throws -> ExportAnalysis {
+    private func analyze(_ snapshot: UlyssesLibrarySnapshot, mediaIndex: MediaIndex, sheetOrderIndex: SheetOrderIndex, groupPathResolver: MigrationLayout, commandLine: [String]) async throws -> ExportAnalysis {
         let sheetExporter = SheetExporter(
             mediaIndex: mediaIndex,
             sheetOrderIndex: sheetOrderIndex,
             favoriteSheetPaths: snapshot.favoriteSheetPaths,
             groupPathResolver: groupPathResolver
         )
-        let prepared = try await process(snapshot.sheets) { try sheetExporter.prepare($0) }
+        let prepared = try await process(snapshot.sheets, phase: "Analyzing sheets") { try sheetExporter.prepare($0) }
         let names = OutputNameResolver(prepared: prepared, groupPaths: groupPathResolver)
         let results = prepared.map { sheetExporter.analyze($0, named: names.name(for: $0.source)) }
         var (summary, orderEntries) = aggregate(results)
@@ -273,6 +306,7 @@ public struct Exporter {
 
     private func process<Input: Sendable, Result: Sendable>(
         _ inputs: [Input],
+        phase: String,
         operation: @escaping @Sendable (Input) throws -> Result
     ) async throws -> [Result] {
         try await withThrowingTaskGroup(of: Result.self) { group in
@@ -285,6 +319,10 @@ public struct Exporter {
             results.reserveCapacity(inputs.count)
             for try await result in group {
                 results.append(result)
+                let completed = results.count
+                if completed == inputs.count || completed % 100 == 0 {
+                    progress?(ExportProgress(phase: phase, completed: completed, total: inputs.count))
+                }
                 if let input = iterator.next() { group.addTask { try operation(input) } }
             }
             return results
@@ -297,7 +335,12 @@ public struct Exporter {
         return (summary, results.map(\.orderEntry))
     }
 
-    private func outputCheck(for outputURL: URL) -> PreflightCheck {
+    private func outputCheck(for outputURL: URL, inputURL: URL) -> PreflightCheck {
+        let standardized = outputURL.standardizedFileURL
+        let forbidden = [URL(fileURLWithPath: "/").standardizedFileURL.path, FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path]
+        if forbidden.contains(standardized.path) || standardized.path.hasPrefix(inputURL.standardizedFileURL.path + "/") {
+            return PreflightCheck(name: "Output folder", status: .failure, message: "Refusing unsafe destination \(standardized.path). Choose a new dedicated folder outside the backup.")
+        }
         var isDirectory = ObjCBool(false)
         if FileManager.default.fileExists(atPath: outputURL.path, isDirectory: &isDirectory) {
             guard isDirectory.boolValue else {
@@ -322,6 +365,30 @@ public struct Exporter {
         return PreflightCheck(name: "Output folder", status: .failure, message: "Cannot write to \(parent.path). Choose a writable destination.")
     }
 
+    private func capacityCheck(inputURL: URL, outputURL: URL) -> PreflightCheck {
+        var sourceBytes: Int64 = 0
+        if let enumerator = FileManager.default.enumerator(
+            at: inputURL,
+            includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey],
+            options: [.skipsHiddenFiles]
+        ) {
+            for case let url as URL in enumerator {
+                let values = try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey])
+                sourceBytes += Int64(values?.totalFileAllocatedSize ?? values?.fileAllocatedSize ?? 0)
+            }
+        }
+        var probe = outputURL.deletingLastPathComponent()
+        while !FileManager.default.fileExists(atPath: probe.path), probe.path != "/" {
+            probe.deleteLastPathComponent()
+        }
+        let available = (try? probe.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage) ?? 0
+        let required = max(sourceBytes * 2, 100 * 1_024 * 1_024)
+        if available > required {
+            return PreflightCheck(name: "Free disk space", status: .success, message: "At least \(ByteCountFormatter.string(fromByteCount: available, countStyle: .file)) is available; estimated requirement is \(ByteCountFormatter.string(fromByteCount: required, countStyle: .file)).")
+        }
+        return PreflightCheck(name: "Free disk space", status: .failure, message: "Only \(ByteCountFormatter.string(fromByteCount: available, countStyle: .file)) is available. Free at least \(ByteCountFormatter.string(fromByteCount: required, countStyle: .file)) before migrating.")
+    }
+
     private func requireEmptyOutput(_ outputURL: URL) throws {
         var isDirectory = ObjCBool(false)
         guard FileManager.default.fileExists(atPath: outputURL.path, isDirectory: &isDirectory) else { return }
@@ -339,6 +406,9 @@ public enum ExportError: Error, LocalizedError {
     case outputNotDirectory(String)
     case outputNotEmpty(String)
     case destinationCollision(String)
+    case unverifiedFormat([String])
+    case backupDiscoveryFailed(String)
+    case validationFailed(String)
 
     public var errorDescription: String? {
         switch self {
@@ -354,6 +424,12 @@ public enum ExportError: Error, LocalizedError {
             "The output folder \(path) is not empty. Choose a new empty folder, or remove the previous migration after reviewing it."
         case .destinationCollision(let path):
             "Two exported items resolved to \(path). This is an exporter naming error; run with --analyze and include the support report in a bug report."
+        case .unverifiedFormat(let reasons):
+            "This backup does not match the verified Ulysses 40 format. \(reasons.joined(separator: " ")) Run `export-ulysses doctor` and attach its anonymous support JSON. Developers may inspect with --allow-unknown-format, but should not trust that export without validation."
+        case .backupDiscoveryFailed(let path):
+            "No Ulysses backup was found in \(path). In Ulysses choose Help > Open Backup, or pass --backup with a .ulbackup path."
+        case .validationFailed(let reason):
+            "The staged migration failed validation and was not published. \(reason) Run `export-ulysses doctor` and attach the anonymous support JSON when reporting this problem."
         }
     }
 }
@@ -371,6 +447,8 @@ public struct UlyssesLibrarySnapshot: Sendable, Equatable {
     public let groups: [GroupSource]
     public let favoriteSheetPaths: Set<String>
     public let filters: [UlyssesFilter]
+    public let fingerprint: BackupFingerprint
+    public let compatibility: FormatCompatibility
 }
 
 public struct UlyssesFilter: Sendable, Equatable {
@@ -406,22 +484,31 @@ public struct UlyssesGroupMetadata: Sendable, Equatable {
     }
 }
 
-struct UlyssesBackupReader {
-    func readLibrary(in inputURL: URL, keepGroups: Bool, ignoring ignoredGroups: Set<String>) throws -> UlyssesLibrarySnapshot {
+public struct Ulysses40BackupReader: UlyssesFormatReader {
+    public init() {}
+
+    public func supports(_ fingerprint: BackupFingerprint) -> Bool {
+        Ulysses40Format.evaluate(fingerprint).verified
+    }
+
+    public func readLibrary(in inputURL: URL) throws -> UlyssesLibrarySnapshot {
         let root = inputURL.standardizedFileURL
-        let normalizedIgnoredGroups = Set(ignoredGroups.map(Self.normalizedGroupName))
-        let sheets = try findSheets(in: root, keepGroups: keepGroups, ignoring: normalizedIgnoredGroups)
-        let groups = findGroups(in: root, keepGroups: keepGroups, ignoring: normalizedIgnoredGroups)
+        let fingerprint = try BackupFingerprintScanner().scan(root)
+        let compatibility = Ulysses40Format.evaluate(fingerprint)
+        let sheets = try findSheets(in: root)
+        let groups = findGroups(in: root)
         return UlyssesLibrarySnapshot(
             rootURL: root,
             sheets: sheets,
             groups: groups,
             favoriteSheetPaths: findFavoriteSheetPaths(in: root),
-            filters: findFilters(in: root, keepGroups: keepGroups, ignoring: normalizedIgnoredGroups)
+            filters: findFilters(in: root),
+            fingerprint: fingerprint,
+            compatibility: compatibility
         )
     }
 
-    func findSheets(in inputURL: URL, keepGroups: Bool, ignoring ignoredGroups: Set<String>) throws -> [SheetSource] {
+    func findSheets(in inputURL: URL) throws -> [SheetSource] {
         let root = inputURL.standardizedFileURL
         guard let enumerator = FileManager.default.enumerator(
             at: root,
@@ -440,21 +527,14 @@ struct UlyssesBackupReader {
             guard FileManager.default.isReadableFile(atPath: contentURL.path) else { continue }
 
             let sourceGroupPath = groupPath(forDirectoryAt: url.deletingLastPathComponent(), root: root)
-            if sourceGroupPath.contains(where: { ignoredGroups.contains(Self.normalizedGroupName($0)) }) {
-                enumerator.skipDescendants()
-                continue
-            }
-            let groupPath = keepGroups ? sourceGroupPath : []
-
-            sheets.append(SheetSource(packageURL: url, contentURL: contentURL, groupURL: url.deletingLastPathComponent(), groupPath: groupPath))
+            sheets.append(SheetSource(packageURL: url, contentURL: contentURL, groupURL: url.deletingLastPathComponent(), groupPath: sourceGroupPath))
             enumerator.skipDescendants()
         }
         return sheets
     }
 
-    private func findGroups(in inputURL: URL, keepGroups: Bool, ignoring ignoredGroups: Set<String>) -> [GroupSource] {
-        guard keepGroups,
-              let enumerator = FileManager.default.enumerator(
+    private func findGroups(in inputURL: URL) -> [GroupSource] {
+        guard let enumerator = FileManager.default.enumerator(
                 at: inputURL,
                 includingPropertiesForKeys: [.isDirectoryKey],
                 options: [.skipsHiddenFiles]
@@ -470,9 +550,7 @@ struct UlyssesBackupReader {
             guard url.lastPathComponent == "Info.ulgroup" else { continue }
             let groupURL = url.deletingLastPathComponent()
             let groupPath = groupPath(forDirectoryAt: groupURL, root: inputURL)
-            guard !groupPath.isEmpty,
-                  !groupPath.contains(where: { ignoredGroups.contains(Self.normalizedGroupName($0)) })
-            else { continue }
+            guard !groupPath.isEmpty else { continue }
             let standardizedPath = groupURL.standardizedFileURL.path
             guard !seen.contains(standardizedPath), let metadata = metadata(forGroupInfoAt: url) else { continue }
             seen.insert(standardizedPath)
@@ -553,7 +631,7 @@ struct UlyssesBackupReader {
         return favorites
     }
 
-    private func findFilters(in root: URL, keepGroups: Bool, ignoring ignoredGroups: Set<String>) -> [UlyssesFilter] {
+    private func findFilters(in root: URL) -> [UlyssesFilter] {
         guard let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: [.isDirectoryKey],
@@ -564,8 +642,7 @@ struct UlyssesBackupReader {
         for case let url as URL in enumerator where url.lastPathComponent == "Info.ulfilter" {
             let filterURL = url.deletingLastPathComponent()
             let sourcePath = groupPath(forDirectoryAt: filterURL.deletingLastPathComponent(), root: root)
-            guard !sourcePath.contains(where: { ignoredGroups.contains(Self.normalizedGroupName($0)) }),
-                  let data = try? Data(contentsOf: url),
+            guard let data = try? Data(contentsOf: url),
                   let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
             else { continue }
 
@@ -574,7 +651,7 @@ struct UlyssesBackupReader {
             let query = plist["query"].map(Self.describePlist) ?? "Unavailable"
             filters.append(UlyssesFilter(
                 name: name,
-                groupPath: keepGroups ? sourcePath : [],
+                groupPath: sourcePath,
                 queryDescription: query,
                 isInTrash: filterURL.pathComponents.contains("Trash-ultrash")
             ))
@@ -594,10 +671,6 @@ struct UlyssesBackupReader {
         default:
             return String(describing: value)
         }
-    }
-
-    private static func normalizedGroupName(_ name: String) -> String {
-        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private func relativePath(for url: URL, root: URL) -> String {
@@ -643,7 +716,7 @@ struct SheetExporter {
     let mediaIndex: MediaIndex
     let sheetOrderIndex: SheetOrderIndex
     let favoriteSheetPaths: Set<String>
-    let groupPathResolver: GroupPathResolver
+    let groupPathResolver: MigrationLayout
 
     func export(_ item: PreparedSheetSource, named outputName: String, to outputRoot: URL) throws -> SheetExportResult {
         let source = item.source
@@ -824,7 +897,7 @@ struct SheetExportResult: Sendable, Equatable {
     let orderEntry: SheetOrderEntry
 }
 
-struct GroupPathResolver: Sendable, Equatable {
+struct MigrationLayout: Sendable, Equatable {
     private let pathsBySourceGroup: [String: [String]]
 
     init(sheets: [SheetSource], groups: [GroupSource]) {
@@ -991,7 +1064,7 @@ private struct GroupNode: Sendable, Equatable {
 struct OutputNameResolver: Sendable, Equatable {
     private let namesBySourcePath: [String: String]
 
-    init(prepared: [PreparedSheetSource], groupPaths: GroupPathResolver) {
+    init(prepared: [PreparedSheetSource], groupPaths: MigrationLayout) {
         let byFolder = Dictionary(grouping: prepared) {
             groupPaths.outputPath(for: $0.source).map(sanitizedFileName).joined(separator: "/").lowercased()
         }
@@ -1307,6 +1380,17 @@ struct ExportReportWriter {
         lines.append("")
         lines.append("- Source type: Ulysses backup")
         lines.append("- Groups discovered: \(snapshot.groups.count)")
+        lines.append("- Compatibility: \(snapshot.compatibility.verified ? "verified" : "developer override")")
+        lines.append("- Verified reader: \(snapshot.compatibility.formatName)")
+        lines.append("- Fingerprint schema: \(snapshot.fingerprint.schemaVersion)")
+        lines.append("- Sheet packages/readable XML: \(snapshot.fingerprint.sheetPackages)/\(snapshot.fingerprint.readableContentFiles)")
+        lines.append("- Store format versions: \(snapshot.fingerprint.storeFormatVersions.keys.sorted().joined(separator: ", "))")
+        lines.append("- Top-level XML nodes: \(snapshot.fingerprint.topLevelElements.keys.sorted().joined(separator: ", "))")
+        lines.append("- Attachment types: \(snapshot.fingerprint.attachmentTypes.keys.sorted().joined(separator: ", "))")
+        lines.append("- Markup identifiers/versions: \(snapshot.fingerprint.markupIdentifiers.keys.sorted().joined(separator: ", ")) / \(snapshot.fingerprint.markupVersions.keys.sorted().joined(separator: ", "))")
+        if !snapshot.fingerprint.malformedPlistPaths.isEmpty {
+            lines.append("- Unreadable metadata paths: \(snapshot.fingerprint.malformedPlistPaths.sorted().joined(separator: ", "))")
+        }
         if !commandLine.isEmpty {
             lines.append("- Command: `\(redactedCommand(commandLine))`")
         }
@@ -1316,14 +1400,19 @@ struct ExportReportWriter {
 
     func supportJSON(summary: ExportSummary, snapshot: UlyssesLibrarySnapshot, commandLine: [String]) throws -> String {
         let report = SupportReport(
-            version: 1,
-            command: commandLine.isEmpty ? nil : redactedCommand(commandLine),
-            counts: summary,
+            reportVersion: 2,
+            exporterVersion: ExportUlyssesVersion.current,
+            command: commandLine.isEmpty ? nil : anonymousCommand(commandLine),
+            counts: AnonymousExportCounts(summary),
+            missingMediaCategories: anonymousMissingMedia(summary.missingMediaDetails),
+            unsupportedNodeNames: summary.unsupportedDetails,
             groupsDiscovered: snapshot.groups.count,
             metadataKeys: metadataKeyCounts(for: snapshot.groups),
+            fingerprint: AnonymousFingerprint(snapshot.fingerprint),
+            compatibility: snapshot.compatibility,
             notes: [
-                "This report intentionally excludes note contents.",
-                "Missing media keys and unsupported XML node names are included for support diagnostics."
+                "This report excludes note contents, titles, filenames, URLs, and filesystem paths.",
+                "The private migration report inside the export contains actionable missing-media details."
             ]
         )
         let encoder = JSONEncoder()
@@ -1346,6 +1435,35 @@ struct ExportReportWriter {
         arguments.map { shellEscaped(redactHome($0)) }.joined(separator: " ")
     }
 
+    private func anonymousCommand(_ arguments: [String]) -> String {
+        var result: [String] = []
+        for (index, argument) in arguments.enumerated() {
+            if index == 0 {
+                result.append(URL(fileURLWithPath: argument).lastPathComponent)
+            } else if ["doctor", "migrate"].contains(argument) || argument.hasPrefix("-") {
+                result.append(argument)
+            }
+        }
+        return result.joined(separator: " ")
+    }
+
+    private func anonymousMissingMedia(_ details: [String: Int]) -> [String: Int] {
+        details.reduce(into: [:]) { result, pair in
+            let reference = pair.key.components(separatedBy: " -> ").last ?? pair.key
+            let category: String
+            if reference.localizedCaseInsensitiveContains("file://") {
+                category = "external-file-url"
+            } else if reference.hasPrefix("image-url:") {
+                category = "relative-image-reference"
+            } else if reference.hasPrefix("file-attachment:") {
+                category = "file-attachment-id"
+            } else {
+                category = "other-unresolved-reference"
+            }
+            result[category, default: 0] += pair.value
+        }
+    }
+
     private func redactHome(_ value: String) -> String {
         let home = NSHomeDirectory()
         if value == home {
@@ -1366,12 +1484,109 @@ struct ExportReportWriter {
 }
 
 struct SupportReport: Codable, Equatable {
-    let version: Int
+    let reportVersion: Int
+    let exporterVersion: String
     let command: String?
-    let counts: ExportSummary
+    let counts: AnonymousExportCounts
+    let missingMediaCategories: [String: Int]
+    let unsupportedNodeNames: [String: Int]
     let groupsDiscovered: Int
     let metadataKeys: [String: Int]
+    let fingerprint: AnonymousFingerprint
+    let compatibility: FormatCompatibility
     let notes: [String]
+}
+
+struct AnonymousExportCounts: Codable, Equatable {
+    let sheets: Int
+    let sidebarNotes: Int
+    let fileAttachments: Int
+    let inlineImages: Int
+    let keywords: Int
+    let materialSheets: Int
+    let gluedSheets: Int
+    let archiveSheets: Int
+    let templateSheets: Int
+    let trashSheets: Int
+    let favoriteSheets: Int
+    let savedFilters: Int
+    let orderNotes: Int
+    let metadataNotes: Int
+    let duplicateTitles: Int
+    let missingMedia: Int
+    let recoveredMedia: Int
+    let unsupportedNodes: Int
+
+    init(_ summary: ExportSummary) {
+        sheets = summary.sheets
+        sidebarNotes = summary.sidebarNotes
+        fileAttachments = summary.fileAttachments
+        inlineImages = summary.inlineImages
+        keywords = summary.keywords
+        materialSheets = summary.materialSheets
+        gluedSheets = summary.gluedSheets
+        archiveSheets = summary.archiveSheets
+        templateSheets = summary.templateSheets
+        trashSheets = summary.trashSheets
+        favoriteSheets = summary.favoriteSheets
+        savedFilters = summary.savedFilters
+        orderNotes = summary.orderNotes
+        metadataNotes = summary.metadataNotes
+        duplicateTitles = summary.duplicateTitles
+        missingMedia = summary.missingMedia
+        recoveredMedia = summary.recoveredMedia
+        unsupportedNodes = summary.unsupportedNodes
+    }
+}
+
+struct AnonymousFingerprint: Codable, Equatable {
+    let schemaVersion: Int
+    let sheetPackages: Int
+    let readableContentFiles: Int
+    let malformedContentFiles: Int
+    let plistFiles: Int
+    let readablePlistFiles: Int
+    let malformedPlistFiles: Int
+    let malformedPlistKinds: [String: Int]
+    let rootElements: [String: Int]
+    let topLevelElements: [String: Int]
+    let attachmentTypes: [String: Int]
+    let markupIdentifiers: [String: Int]
+    let markupVersions: [String: Int]
+    let markupDefinitions: [String: Int]
+    let elementKinds: [String: Int]
+    let paragraphKinds: [String: Int]
+    let attributeIdentifiers: [String: Int]
+    let storeFormatVersions: [String: Int]
+    let plistRootTypes: [String: Int]
+    let packageExtensions: [String: Int]
+    let contentFileNames: [String: Int]
+    let storagePackageExtensions: [String: Int]
+
+    init(_ fingerprint: BackupFingerprint) {
+        schemaVersion = fingerprint.schemaVersion
+        sheetPackages = fingerprint.sheetPackages
+        readableContentFiles = fingerprint.readableContentFiles
+        malformedContentFiles = fingerprint.malformedContentFiles
+        plistFiles = fingerprint.plistFiles
+        readablePlistFiles = fingerprint.readablePlistFiles
+        malformedPlistFiles = fingerprint.malformedPlistFiles
+        malformedPlistKinds = fingerprint.malformedPlistKinds
+        rootElements = fingerprint.rootElements
+        topLevelElements = fingerprint.topLevelElements
+        attachmentTypes = fingerprint.attachmentTypes
+        markupIdentifiers = fingerprint.markupIdentifiers
+        markupVersions = fingerprint.markupVersions
+        markupDefinitions = fingerprint.markupDefinitions
+        elementKinds = fingerprint.elementKinds
+        paragraphKinds = fingerprint.paragraphKinds
+        attributeIdentifiers = fingerprint.attributeIdentifiers
+        storeFormatVersions = fingerprint.storeFormatVersions
+        plistRootTypes = fingerprint.plistRootTypes
+        packageExtensions = fingerprint.packageExtensions
+        contentFileNames = fingerprint.contentFileNames
+        storagePackageExtensions = fingerprint.storagePackageExtensions
+    }
 }
 
 struct UlyssesSheet: Sendable, Equatable {

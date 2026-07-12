@@ -1,53 +1,53 @@
-name: Bug report
-description: Report an export, FSNotes import, asset, or metadata problem.
+name: Migration problem
+description: Report an export, validation, or FSNotes behavior problem
 title: "[Bug]: "
-labels:
-  - bug
+labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: |
-        Do not attach your Ulysses backup or exported note contents. Run `--doctor --analyze` or include `.export-ulysses/ulysses-export-report.json`; it is designed to avoid note text.
+      value: Do not attach a Ulysses backup, private manifest, or visible migration report. Attach only the anonymous support JSON after reviewing it.
   - type: input
-    id: versions
+    id: version
     attributes:
-      label: Versions
-      description: Ulysses, FSNotes, macOS, Swift, and export-ulysses commit or release.
-      placeholder: "Ulysses 40, FSNotes 7.2.1, macOS 26, Swift 6.3.2, export-ulysses ..."
+      label: Exporter version
+      description: Output of `export-ulysses --version`
+    validations:
+      required: true
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Failure stage
+      options:
+        - doctor or format check
+        - migration or validation
+        - FSNotes setup or display
+        - missing content or media
+    validations:
+      required: true
+  - type: checkboxes
+    id: setup
+    attributes:
+      label: FSNotes setup
+      options:
+        - label: I selected the export root as FSNotes Default Storage.
+        - label: I verified the FSNotes Trash path points inside that root.
+        - label: I exported Ulysses External Folders separately.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Include the exact error, expected behavior, and reproduction steps without note content.
     validations:
       required: true
   - type: textarea
-    id: command
+    id: support
     attributes:
-      label: Command
-      description: Paste the command you ran. Replace private path segments with $HOME or <redacted>.
-      render: sh
-    validations:
-      required: true
-  - type: textarea
-    id: report
+      label: Anonymous support JSON
+      description: Paste or attach `.export-ulysses/ulysses-export-report.json` only after reviewing it.
+  - type: checkboxes
+    id: privacy
     attributes:
-      label: Support report
-      description: Paste `.export-ulysses/ulysses-export-report.json` or the console output from `--doctor --analyze`.
-      render: json
-    validations:
-      required: true
-  - type: textarea
-    id: expected
-    attributes:
-      label: Expected behavior
-      description: What did you expect to appear in FSNotes?
-    validations:
-      required: true
-  - type: textarea
-    id: actual
-    attributes:
-      label: Actual behavior
-      description: What happened instead?
-    validations:
-      required: true
-  - type: textarea
-    id: minimal
-    attributes:
-      label: Minimal fixture
-      description: If possible, describe or attach a small synthetic Ulysses/TextBundle fixture that does not contain private writing.
+      label: Privacy confirmation
+      options:
+        - label: I reviewed the attachment and did not include my backup, private manifest, note text, titles, filenames, URLs, or paths.
+          required: true

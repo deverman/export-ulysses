@@ -7,7 +7,7 @@ struct MigrationIndexCounts: Equatable {
 
 struct MigrationIndexWriter {
     let sheetOrderIndex: SheetOrderIndex
-    let groupPathResolver: GroupPathResolver
+    let groupPathResolver: MigrationLayout
     let outputURL: URL
 
     func write(entries: [SheetOrderEntry], groups: [GroupSource]) throws -> MigrationIndexCounts {
@@ -148,7 +148,7 @@ func fsNotesLink(for entry: SheetOrderEntry, showFileName: Bool = false) -> Stri
 
 struct LibraryCompanionWriter {
     let outputURL: URL
-    let groupPathResolver: GroupPathResolver
+    let groupPathResolver: MigrationLayout
 
     func write(snapshot: UlyssesLibrarySnapshot, entries: [SheetOrderEntry], summary: ExportSummary) throws {
         let migrationDirectory = outputURL.appendingPathComponent("_Ulysses Migration", isDirectory: true)

@@ -29,8 +29,7 @@ final class UlyssesExporterTests: XCTestCase {
         let summary = try await Exporter(maxConcurrentExports: 2).run(
             input: input.path,
             output: output.path,
-            keepGroups: true,
-            ignoring: []
+            allowUnknownFormat: true
         )
 
         XCTAssertEqual(summary.sheets, 1)
@@ -93,7 +92,7 @@ final class UlyssesExporterTests: XCTestCase {
         """).write(to: sheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
 
         let output = root.appendingPathComponent("Output")
-        let summary = try await Exporter().run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+        let summary = try await Exporter().run(input: input.path, output: output.path, allowUnknownFormat: true)
 
         XCTAssertEqual(summary.sheets, 1)
         XCTAssertEqual(summary.materialSheets, 1)
@@ -113,7 +112,7 @@ final class UlyssesExporterTests: XCTestCase {
         try titledSheet("Regular Group Note").write(to: sheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
 
         let output = root.appendingPathComponent("Output")
-        let summary = try await Exporter().run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+        let summary = try await Exporter().run(input: input.path, output: output.path, allowUnknownFormat: true)
         let markdown = try String(
             contentsOf: output.appendingPathComponent("Archive/Regular Group Note.textbundle/text.markdown"),
             encoding: .utf8
@@ -139,7 +138,7 @@ final class UlyssesExporterTests: XCTestCase {
         try titledSheet("Ordinary Trash Note").write(to: trashSheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
 
         let output = root.appendingPathComponent("Output")
-        let summary = try await Exporter().run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+        let summary = try await Exporter().run(input: input.path, output: output.path, allowUnknownFormat: true)
 
         XCTAssertEqual(summary.trashSheets, 0)
         XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("Inbox (Ulysses Group)/Ordinary Inbox Note.textbundle").path))
@@ -167,7 +166,7 @@ final class UlyssesExporterTests: XCTestCase {
         try titledSheet("Second Deleted Note").write(to: second.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
 
         let output = root.appendingPathComponent("Output")
-        let summary = try await Exporter().run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+        let summary = try await Exporter().run(input: input.path, output: output.path, allowUnknownFormat: true)
 
         XCTAssertEqual(summary.trashSheets, 2)
         XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("Trash/First Deleted Note.textbundle").path))
@@ -205,7 +204,7 @@ final class UlyssesExporterTests: XCTestCase {
         try titledSheet("Third").write(to: third.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
 
         let output = root.appendingPathComponent("Output")
-        let summary = try await Exporter(maxConcurrentExports: 3).run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+        let summary = try await Exporter(maxConcurrentExports: 3).run(input: input.path, output: output.path, allowUnknownFormat: true)
 
         XCTAssertEqual(summary.sheets, 3)
         XCTAssertEqual(summary.gluedSheets, 2)
@@ -256,12 +255,12 @@ final class UlyssesExporterTests: XCTestCase {
         """).write(to: referencingSheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
 
         let output = root.appendingPathComponent("Output")
-        let summary = try await Exporter().run(input: input.path, output: output.path, keepGroups: false, ignoring: [])
+        let summary = try await Exporter().run(input: input.path, output: output.path, allowUnknownFormat: true)
 
         XCTAssertEqual(summary.sheets, 2)
         XCTAssertEqual(summary.missingMedia, 0)
         XCTAssertEqual(summary.recoveredMedia, 1)
-        let bundle = output.appendingPathComponent("Recovered Reference.textbundle")
+        let bundle = output.appendingPathComponent("Inbox (Ulysses Group)/Recovered Reference.textbundle")
         let markdown = try String(contentsOf: bundle.appendingPathComponent("text.markdown"), encoding: .utf8)
         XCTAssertTrue(markdown.contains("![Screen Shot.recover123.png](assets/Screen%20Shot.recover123.png)"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: bundle.appendingPathComponent("assets/Screen Shot.recover123.png").path))
@@ -282,12 +281,12 @@ final class UlyssesExporterTests: XCTestCase {
         """).write(to: sheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
 
         let output = root.appendingPathComponent("Output")
-        let summary = try await Exporter().run(input: input.path, output: output.path, keepGroups: false, ignoring: [])
+        let summary = try await Exporter().run(input: input.path, output: output.path, allowUnknownFormat: true)
 
         XCTAssertEqual(summary.sheets, 1)
         XCTAssertEqual(summary.inlineImages, 1)
         XCTAssertEqual(summary.missingMedia, 1)
-        let markdown = try String(contentsOf: output.appendingPathComponent("Missing Media.textbundle/text.markdown"), encoding: .utf8)
+        let markdown = try String(contentsOf: output.appendingPathComponent("Inbox (Ulysses Group)/Missing Media.textbundle/text.markdown"), encoding: .utf8)
         XCTAssertTrue(markdown.contains("![]()"))
     }
 
@@ -323,7 +322,7 @@ final class UlyssesExporterTests: XCTestCase {
         try titledSheet("Deleted Draft").write(to: trashSheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
 
         let output = root.appendingPathComponent("Output")
-        let summary = try await Exporter().run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+        let summary = try await Exporter().run(input: input.path, output: output.path, allowUnknownFormat: true)
 
         XCTAssertEqual(summary.sheets, 2)
         XCTAssertEqual(summary.archiveSheets, 1)
@@ -411,7 +410,7 @@ final class UlyssesExporterTests: XCTestCase {
         try filterData.write(to: filter.appendingPathComponent("Info.ulfilter"))
 
         let output = root.appendingPathComponent("Output")
-        let summary = try await Exporter().run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+        let summary = try await Exporter().run(input: input.path, output: output.path, allowUnknownFormat: true)
 
         XCTAssertEqual(summary.favoriteSheets, 1)
         XCTAssertEqual(summary.savedFilters, 1)
@@ -443,8 +442,8 @@ final class UlyssesExporterTests: XCTestCase {
         """).write(to: sheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
 
         let output = root.appendingPathComponent("Output")
-        _ = try await Exporter().run(input: input.path, output: output.path, keepGroups: false, ignoring: [])
-        let markdown = try String(contentsOf: output.appendingPathComponent("Markup.textbundle/text.markdown"), encoding: .utf8)
+        _ = try await Exporter().run(input: input.path, output: output.path, allowUnknownFormat: true)
+        let markdown = try String(contentsOf: output.appendingPathComponent("Inbox (Ulysses Group)/Markup.textbundle/text.markdown"), encoding: .utf8)
 
         XCTAssertTrue(markdown.contains("Body[^ulysses-1]"))
         XCTAssertTrue(markdown.contains("[^ulysses-1]: Footnote text."))
@@ -454,7 +453,7 @@ final class UlyssesExporterTests: XCTestCase {
         XCTAssertTrue(markdown.contains("```\nlet value = 1\n```"))
     }
 
-    func testIgnoreSkipsMatchingGroupInsteadOfFlatteningIt() async throws {
+    func testMigrationAlwaysIncludesEveryGroup() async throws {
         let root = try temporaryDirectory()
         let input = root.appendingPathComponent("Backup.ulbackup")
         let groups = input.appendingPathComponent("Store.ulstoragebackup/Content/Groups-ulgroup")
@@ -468,11 +467,11 @@ final class UlyssesExporterTests: XCTestCase {
         try titledSheet("Kept Note").write(to: kept.appendingPathComponent("kept.ulysses/Content.xml"), atomically: true, encoding: .utf8)
 
         let output = root.appendingPathComponent("Output")
-        let summary = try await Exporter().run(input: input.path, output: output.path, keepGroups: true, ignoring: [" ignored "])
+        let summary = try await Exporter().run(input: input.path, output: output.path, allowUnknownFormat: true)
 
-        XCTAssertEqual(summary.sheets, 1)
+        XCTAssertEqual(summary.sheets, 2)
         XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("Kept/Kept Note.textbundle").path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: output.appendingPathComponent("Ignored").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("Ignored/Ignored Note.textbundle").path))
     }
 
     func testRefusesToAppendASecondMigrationToNonEmptyOutput() async throws {
@@ -482,10 +481,10 @@ final class UlyssesExporterTests: XCTestCase {
         try FileManager.default.createDirectory(at: sheet, withIntermediateDirectories: true)
         try titledSheet("One Note").write(to: sheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
         let output = root.appendingPathComponent("Output")
-        _ = try await Exporter().run(input: input.path, output: output.path, keepGroups: false, ignoring: [])
+        _ = try await Exporter().run(input: input.path, output: output.path, allowUnknownFormat: true)
 
         do {
-            _ = try await Exporter().run(input: input.path, output: output.path, keepGroups: false, ignoring: [])
+            _ = try await Exporter().run(input: input.path, output: output.path, allowUnknownFormat: true)
             XCTFail("Expected a non-empty output error")
         } catch let error as ExportError {
             guard case .outputNotEmpty = error else { return XCTFail("Unexpected error: \(error)") }
@@ -505,7 +504,7 @@ final class UlyssesExporterTests: XCTestCase {
         try titledSheet("Same Title").write(to: second.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
 
         let output = root.appendingPathComponent("Output")
-        _ = try await Exporter(maxConcurrentExports: 2).run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+        _ = try await Exporter(maxConcurrentExports: 2).run(input: input.path, output: output.path, allowUnknownFormat: true)
         let map = try String(contentsOf: output.appendingPathComponent("_Ulysses Migration/Ulysses Library Map.textbundle/text.markdown"), encoding: .utf8)
 
         XCTAssertTrue(map.contains("fsnotes://find?id=Same%20Title)"))
@@ -531,15 +530,13 @@ final class UlyssesExporterTests: XCTestCase {
 
         let analysis = try await Exporter(maxConcurrentExports: 3).analyze(
             input: input.path,
-            keepGroups: true,
-            ignoring: []
+            allowUnknownFormat: true
         )
         let output = root.appendingPathComponent("Output")
         let summary = try await Exporter(maxConcurrentExports: 3).run(
             input: input.path,
             output: output.path,
-            keepGroups: true,
-            ignoring: []
+            allowUnknownFormat: true
         )
 
         XCTAssertEqual(analysis.summary.duplicateTitles, 1)
@@ -564,7 +561,7 @@ final class UlyssesExporterTests: XCTestCase {
         try titledSheet("Second Note").write(to: secondGroup.appendingPathComponent("second.ulysses/Content.xml"), atomically: true, encoding: .utf8)
 
         let output = root.appendingPathComponent("Output")
-        _ = try await Exporter().run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+        _ = try await Exporter().run(input: input.path, output: output.path, allowUnknownFormat: true)
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("Same Group [one]/First Note.textbundle").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("Same Group [two]/Second Note.textbundle").path))
@@ -589,7 +586,7 @@ final class UlyssesExporterTests: XCTestCase {
         try titledSheet("Second Note").write(to: secondChild.appendingPathComponent("second.ulysses/Content.xml"), atomically: true, encoding: .utf8)
 
         let output = root.appendingPathComponent("Output")
-        _ = try await Exporter().run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+        _ = try await Exporter().run(input: input.path, output: output.path, allowUnknownFormat: true)
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("Store/Same Parent [one]/Alpha/First Note.textbundle").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("Store/Same Parent [two]/Beta/Second Note.textbundle").path))
@@ -611,9 +608,9 @@ final class UlyssesExporterTests: XCTestCase {
         """).write(to: sheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
 
         let output = root.appendingPathComponent("Output")
-        _ = try await Exporter().run(input: input.path, output: output.path, keepGroups: false, ignoring: [])
+        _ = try await Exporter().run(input: input.path, output: output.path, allowUnknownFormat: true)
 
-        let markdown = try String(contentsOf: output.appendingPathComponent("Cover Image.textbundle/text.markdown"), encoding: .utf8)
+        let markdown = try String(contentsOf: output.appendingPathComponent("Inbox (Ulysses Group)/Cover Image.textbundle/text.markdown"), encoding: .utf8)
         XCTAssertTrue(markdown.contains("![Cover Image](assets/Cover%20%281%29.asset123.png)"))
     }
 
@@ -632,7 +629,7 @@ final class UlyssesExporterTests: XCTestCase {
         </sheet>
         """).write(to: sheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
 
-        let analysis = try await Exporter().analyze(input: input.path, keepGroups: true, ignoring: [])
+        let analysis = try await Exporter().analyze(input: input.path, allowUnknownFormat: true)
 
         XCTAssertEqual(analysis.summary.sheets, 1)
         XCTAssertEqual(analysis.summary.missingMedia, 1)
@@ -646,17 +643,216 @@ final class UlyssesExporterTests: XCTestCase {
             throw XCTSkip("Set ULYSSES_BACKUP_PATH to run the private real-backup smoke test.")
         }
 
-        let analysis = try await Exporter().analyze(input: path, keepGroups: true, ignoring: [])
+        let analysis = try await Exporter().analyze(input: path)
 
         XCTAssertGreaterThan(analysis.summary.sheets, 0)
         XCTAssertTrue(analysis.reportMarkdown.contains("# Ulysses Export Report"))
         XCTAssertTrue(analysis.supportJSON.contains("\"counts\""))
     }
 
+    func testStrictFormatAcceptsVerifiedUlysses40Structure() async throws {
+        let input = try verifiedBackup(sheetXML: titledSheet("Verified"))
+
+        let analysis = try await Exporter().analyze(input: input.path)
+
+        XCTAssertEqual(analysis.summary.sheets, 1)
+        XCTAssertTrue(analysis.supportJSON.contains("\"verified\" : true"))
+    }
+
+    func testStrictFormatRejectsStructuralSchemaDrift() async throws {
+        let variants = [
+            "<sheet><string><p>Body</p></string><future-content /></sheet>",
+            "<sheet><string><p>Body</p></string><attachment type=\"future\">x</attachment></sheet>"
+        ]
+        for xml in variants {
+            let input = try verifiedBackup(sheetXML: contentXML(xml))
+            do {
+                _ = try await Exporter().analyze(input: input.path)
+                XCTFail("Expected unverified format rejection")
+            } catch let error as ExportError {
+                guard case .unverifiedFormat = error else {
+                    return XCTFail("Unexpected error: \(error)")
+                }
+            }
+        }
+    }
+
+    func testStrictFormatRejectsUnknownMarkupGrammar() async throws {
+        let input = try verifiedBackup(sheetXML: contentXML("""
+        <sheet>
+          <markup version="2" identifier="custom"><tag definition="heading1" pattern="!" /></markup>
+          <string><p>Body</p></string>
+        </sheet>
+        """))
+
+        do {
+            _ = try await Exporter().analyze(input: input.path)
+            XCTFail("Expected unknown markup grammar rejection")
+        } catch let error as ExportError {
+            guard case .unverifiedFormat(let reasons) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+            XCTAssertTrue(reasons.joined().contains("markup"))
+        }
+    }
+
+    func testStrictFormatRejectsNewStoreVersionAndChangedPlistType() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let content = input.appendingPathComponent("Store.ulstoragebackup/Content")
+        let sheet = content.appendingPathComponent("one.ulysses")
+        try FileManager.default.createDirectory(at: sheet, withIntermediateDirectories: true)
+        try titledSheet("Changed Store").write(to: sheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+        try plist(displayNameValue: "<array/>", storeVersion: 2)
+            .write(to: content.appendingPathComponent("Info.ulgroup"), atomically: true, encoding: .utf8)
+
+        do {
+            _ = try await Exporter().analyze(input: input.path)
+            XCTFail("Expected unverified format rejection")
+        } catch let error as ExportError {
+            guard case .unverifiedFormat(let reasons) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+            XCTAssertTrue(reasons.joined().contains("storeFormatVersion"))
+            XCTAssertTrue(reasons.joined().contains("displayName"))
+        }
+    }
+
+    func testStrictFormatRejectsMissingOrRenamedContent() async throws {
+        for packageName in ["missing.ulysses", "renamed.ulysses2"] {
+            let root = try temporaryDirectory()
+            let input = root.appendingPathComponent("Backup.ulbackup")
+            let content = input.appendingPathComponent("Store.ulstoragebackup/Content")
+            try FileManager.default.createDirectory(at: content.appendingPathComponent(packageName), withIntermediateDirectories: true)
+            try plist(displayNameValue: "<string>Store</string>", storeVersion: 1)
+                .write(to: content.appendingPathComponent("Info.ulgroup"), atomically: true, encoding: .utf8)
+            do {
+                _ = try await Exporter().analyze(input: input.path)
+                XCTFail("Expected missing or renamed content rejection")
+            } catch let error as ExportError {
+                guard case .unverifiedFormat = error else {
+                    return XCTFail("Unexpected error: \(error)")
+                }
+            }
+        }
+    }
+
+    func testStrictFormatRejectsMixedStoreVersions() async throws {
+        let input = try verifiedBackup(sheetXML: titledSheet("Mixed"))
+        let second = input.appendingPathComponent("Second.ulstoragebackup/Content")
+        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
+        try plist(displayNameValue: "<string>Second</string>", storeVersion: 2)
+            .write(to: second.appendingPathComponent("Info.ulgroup"), atomically: true, encoding: .utf8)
+
+        do {
+            _ = try await Exporter().analyze(input: input.path)
+            XCTFail("Expected mixed store version rejection")
+        } catch let error as ExportError {
+            guard case .unverifiedFormat(let reasons) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+            XCTAssertTrue(reasons.joined().contains("2"))
+        }
+    }
+
+    func testStrictFormatReportsMalformedOptionalPlistMetadata() async throws {
+        let input = try verifiedBackup(sheetXML: titledSheet("Malformed Metadata"))
+        let info = input.appendingPathComponent("Store.ulstoragebackup/Content/Broken-ulgroup/Info.ulgroup")
+        try FileManager.default.createDirectory(at: info.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "<plist><dict><key>storeFormatVersion</key>".write(to: info, atomically: true, encoding: .utf8)
+
+        let analysis = try await Exporter().analyze(input: input.path)
+
+        XCTAssertTrue(analysis.supportJSON.contains("\"malformedPlistFiles\" : 1"))
+        XCTAssertTrue(analysis.reportMarkdown.contains("Store.ulstoragebackup/Content/Broken-ulgroup/Info.ulgroup"))
+    }
+
+    func testMalformedXMLVariantsThrowWithoutCrashing() throws {
+        let variants = [
+            "",
+            "<sheet>",
+            "<sheet><string></sheet>",
+            "<sheet><string>&invalid;</string></sheet>",
+            "<sheet><attachment type=\"note\"><string></attachment></sheet>"
+        ]
+        for xml in variants {
+            let url = URL(fileURLWithPath: "/synthetic/Content.xml")
+            XCTAssertThrowsError(try UlyssesSheetParser(contentURL: url).parse(Data(xml.utf8)))
+        }
+    }
+
+    func testMalformedOrMissingContentNeverPublishesPartialOutput() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let content = input.appendingPathComponent("Store.ulstoragebackup/Content")
+        let good = content.appendingPathComponent("good.ulysses")
+        let bad = content.appendingPathComponent("bad.ulysses")
+        try FileManager.default.createDirectory(at: good, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: bad, withIntermediateDirectories: true)
+        try titledSheet("Good").write(to: good.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+        try "<sheet><string>broken".write(to: bad.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+        try plist(displayNameValue: "<string>Store</string>", storeVersion: 1)
+            .write(to: content.appendingPathComponent("Info.ulgroup"), atomically: true, encoding: .utf8)
+        let output = root.appendingPathComponent("Output")
+
+        do {
+            _ = try await Exporter().run(input: input.path, output: output.path, allowUnknownFormat: true)
+            XCTFail("Expected malformed XML failure")
+        } catch {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: output.path))
+            let leftovers = try FileManager.default.contentsOfDirectory(atPath: root.path)
+            XCTAssertFalse(leftovers.contains { $0.contains("export-ulysses-") })
+        }
+    }
+
+    func testAnonymousSupportReportContainsNoTitlesPathsOrURLs() async throws {
+        let xml = contentXML("""
+        <sheet>
+        <string><p><tags><tag kind="heading1"># </tag></tags>Private Note Title</p>
+        <p><element kind="image"><attribute identifier="URL">file:///private/secret/photo.jpg</attribute></element></p></string>
+        </sheet>
+        """)
+        let input = try verifiedBackup(sheetXML: xml)
+
+        let analysis = try await Exporter().analyze(
+            input: input.path,
+            commandLine: ["export-ulysses", "doctor", "--backup", input.path]
+        )
+
+        XCTAssertFalse(analysis.supportJSON.contains("Private Note Title"))
+        XCTAssertFalse(analysis.supportJSON.contains("photo.jpg"))
+        XCTAssertFalse(analysis.supportJSON.contains("file:///"))
+        XCTAssertFalse(analysis.supportJSON.contains(input.path))
+        XCTAssertTrue(analysis.supportJSON.contains("external-file-url"))
+        XCTAssertTrue(analysis.reportMarkdown.contains("Private Note Title"))
+    }
+
     private func contentXML(_ body: String) -> String {
         """
         <?xml version="1.0" encoding="UTF-8"?>
         \(body)
+        """
+    }
+
+    private func verifiedBackup(sheetXML: String) throws -> URL {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let content = input.appendingPathComponent("Store.ulstoragebackup/Content")
+        let sheet = content.appendingPathComponent("one.ulysses")
+        try FileManager.default.createDirectory(at: sheet, withIntermediateDirectories: true)
+        try sheetXML.write(to: sheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+        try plist(displayNameValue: "<string>Store</string>", storeVersion: 1)
+            .write(to: content.appendingPathComponent("Info.ulgroup"), atomically: true, encoding: .utf8)
+        return input
+    }
+
+    private func plist(displayNameValue: String, storeVersion: Int) -> String {
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <plist version="1.0"><dict>
+          <key>displayName</key>\(displayNameValue)
+          <key>storeFormatVersion</key><integer>\(storeVersion)</integer>
+        </dict></plist>
         """
     }
 

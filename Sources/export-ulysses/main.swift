@@ -6,92 +6,104 @@ import UlyssesExporter
 struct ExportUlysses: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "export-ulysses",
-        abstract: "Export a Ulysses backup to FSNotes-readable TextBundles."
+        abstract: "Migrate a Ulysses backup to an FSNotes library.",
+        version: ExportUlyssesVersion.current,
+        subcommands: [Migrate.self, Doctor.self]
     )
+}
 
-    @Argument(help: "The path to a Ulysses .ulbackup folder, for example Ulysses/Backups/Latest Backup.ulbackup.")
-    var input: String
+struct BackupOptions: ParsableArguments {
+    @Option(help: "Ulysses .ulbackup path. Defaults to the newest local Ulysses backup.")
+    var backup: String?
 
-    @Argument(help: "The folder where FSNotes TextBundles should be written. Required for export; optional with --analyze or --doctor.")
-    var output: String?
-
-    @Flag(help: "Create directories for each Ulysses Group, and export notes into them.")
-    var keepGroups = false
-
-    @Flag(name: .shortAndLong, help: "Log export activity and debugging statements.")
-    var verbose = false
-
-    @Option(name: .long, parsing: .upToNextOption, help: "Groups to ignore on export.")
-    var ignore: [String] = []
-
-    @Option(help: "Maximum number of sheets to export concurrently.")
+    @Option(help: "Maximum sheets processed concurrently.")
     var jobs = 2
 
-    @Flag(help: "Scan the backup and print a privacy-safe migration report without writing TextBundles.")
-    var analyze = false
+    @Flag(name: .shortAndLong, help: "Print detailed progress.")
+    var verbose = false
 
-    @Flag(help: "Run preflight checks for the backup, output folder, FSNotes TextBundle compatibility, and asset references.")
-    var doctor = false
+    @Flag(help: "Developer override for an unverified Ulysses format. The result may be incomplete.")
+    var allowUnknownFormat = false
+
+    func resolvedBackup() throws -> String {
+        if let backup { return NSString(string: backup).expandingTildeInPath }
+        return try UlyssesBackupLocator().newestBackup().path
+    }
+
+    func exporter() -> Exporter {
+        Exporter(verbose: verbose, maxConcurrentExports: jobs) { update in
+            print("\(update.phase): \(update.completed)/\(update.total)")
+        }
+    }
+}
+
+struct Migrate: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Create a new, validated FSNotes library from Ulysses."
+    )
+
+    @Argument(help: "New output folder to use as FSNotes Default Storage.")
+    var output: String
+
+    @OptionGroup var options: BackupOptions
 
     func run() async throws {
-        let exporter = Exporter(verbose: verbose, maxConcurrentExports: jobs)
-
-        if doctor {
-            let result = await exporter.doctor(
-                input: input,
-                output: output,
-                keepGroups: keepGroups,
-                ignoring: ignore,
-                commandLine: CommandLine.arguments
-            )
-            printPreflight(result)
-            if result.hasFailures {
-                throw ExitCode.failure
-            }
-            if analyze, let analysis = result.analysis {
-                printAnalysis(analysis)
-            }
-            return
-        }
-
-        if analyze {
-            print("Analyzing Ulysses backup for FSNotes migration...")
-            let analysis = try await exporter.analyze(
-                input: input,
-                keepGroups: keepGroups,
-                ignoring: ignore,
-                commandLine: CommandLine.arguments
-            )
-            printAnalysis(analysis)
-            return
-        }
-
-        guard let output else {
-            throw ValidationError("Missing expected argument '<output>'. Provide an output folder, or use --analyze to scan without writing.")
-        }
-
-        print("Starting FSNotes export from Ulysses backup...")
-        let summary = try await exporter
-            .run(input: input, output: output, keepGroups: keepGroups, ignoring: ignore, commandLine: CommandLine.arguments)
-        printSummary(summary)
-        print("Wrote migration notes under _Ulysses Migration and support files under hidden .export-ulysses.")
-        let outputURL = URL(fileURLWithPath: output).standardizedFileURL
+        let input = try options.resolvedBackup()
+        let destination = NSString(string: output).expandingTildeInPath
+        print("Using Ulysses backup: \(input)")
+        print("Starting validated FSNotes migration...")
+        let summary = try await options.exporter().run(
+            input: input,
+            output: destination,
+            allowUnknownFormat: options.allowUnknownFormat,
+            commandLine: CommandLine.arguments
+        )
+        CLIOutput.printSummary(summary)
+        print("Validation passed. Migration notes are under _Ulysses Migration; anonymous diagnostics are under hidden .export-ulysses.")
+        let outputURL = URL(fileURLWithPath: destination).standardizedFileURL
         print("In FSNotes Settings > General, set Default Storage to \(outputURL.path).")
         if summary.trashSheets > 0 {
             print("In FSNotes Settings > Advanced, verify Trash points to \(outputURL.appendingPathComponent("Trash").path) before using Empty Trash.")
         }
     }
+}
 
-    private func printAnalysis(_ analysis: ExportAnalysis) {
-        printSummary(analysis.summary)
-        print("")
-        print("Privacy-safe support report JSON:")
-        print(analysis.supportJSON)
+struct Doctor: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Verify format compatibility and preview a migration without writing notes."
+    )
+
+    @Option(help: "Optional output folder to check for safety, capacity, and writability.")
+    var output: String?
+
+    @OptionGroup var options: BackupOptions
+
+    func run() async throws {
+        let input = try options.resolvedBackup()
+        let destination = output.map { NSString(string: $0).expandingTildeInPath }
+        print("Using Ulysses backup: \(input)")
+        let result = await options.exporter().doctor(
+            input: input,
+            output: destination,
+            allowUnknownFormat: options.allowUnknownFormat,
+            commandLine: CommandLine.arguments
+        )
+        CLIOutput.printPreflight(result)
+        guard !result.hasFailures else { throw ExitCode.failure }
+        if let analysis = result.analysis {
+            print("")
+            CLIOutput.printSummary(analysis.summary, includePrivateDetails: false)
+            print("")
+            print("Anonymous support report JSON:")
+            print(analysis.supportJSON)
+        }
     }
+}
 
-    private func printSummary(_ summary: ExportSummary) {
+enum CLIOutput {
+    static func printSummary(_ summary: ExportSummary, includePrivateDetails: Bool = true) {
         print("""
-        Exported \(summary.sheets) sheets.
+        Sheets: \(summary.sheets)
         Sidebar notes: \(summary.sidebarNotes)
         Sidebar file attachments: \(summary.fileAttachments)
         Inline images: \(summary.inlineImages)
@@ -105,38 +117,24 @@ struct ExportUlysses: AsyncParsableCommand {
         Saved filters: \(summary.savedFilters)
         Sheet order notes: \(summary.orderNotes)
         Group metadata notes: \(summary.metadataNotes)
-        Export report notes: \(summary.reportNotes)
         Duplicate note titles renamed: \(summary.duplicateTitles)
         Missing media references: \(summary.missingMedia)
         Recovered media references: \(summary.recoveredMedia)
-        Unsupported XML nodes: \(summary.unsupportedNodes)
+        Unsupported cosmetic XML nodes: \(summary.unsupportedNodes)
         """)
-
+        guard includePrivateDetails else { return }
         if !summary.missingMediaDetails.isEmpty {
-            print("Missing media detail:")
-            for (key, count) in summary.missingMediaDetails.sorted(by: { $0.key < $1.key }) {
-                print("- \(key): \(count)")
-            }
-        }
-        if !summary.unsupportedDetails.isEmpty {
-            print("Unsupported XML detail:")
-            for (key, count) in summary.unsupportedDetails.sorted(by: { $0.key < $1.key }) {
-                print("- \(key): \(count)")
-            }
+            print("Missing media detail is available in _Ulysses Migration/Ulysses Export Report.")
         }
     }
 
-    private func printPreflight(_ result: PreflightResult) {
+    static func printPreflight(_ result: PreflightResult) {
         print("Preflight checks:")
         for check in result.checks {
-            let prefix: String
-            switch check.status {
-            case .success:
-                prefix = "OK"
-            case .warning:
-                prefix = "WARN"
-            case .failure:
-                prefix = "FAIL"
+            let prefix = switch check.status {
+            case .success: "OK"
+            case .warning: "WARN"
+            case .failure: "FAIL"
             }
             print("[\(prefix)] \(check.name): \(check.message)")
         }

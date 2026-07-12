@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, macos-26-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: swift --version
+      - name: Resolve dependencies
+        run: swift package resolve
+      - name: Build release
+        run: swift build -c release
+      - name: Test
+        run: swift test
+      - name: Check formatting damage
+        run: git diff --check
