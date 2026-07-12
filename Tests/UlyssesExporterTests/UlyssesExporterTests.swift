@@ -42,7 +42,7 @@ final class UlyssesExporterTests: XCTestCase {
         XCTAssertEqual(summary.missingMedia, 0)
         XCTAssertEqual(summary.recoveredMedia, 0)
 
-        let bundle = output.appendingPathComponent("Inbox/Main Title.textbundle")
+        let bundle = output.appendingPathComponent("Main Title.textbundle")
         let markdown = try String(contentsOf: bundle.appendingPathComponent("text.markdown"), encoding: .utf8)
         XCTAssertTrue(markdown.contains("# Main Title"))
         XCTAssertTrue(markdown.contains("Body with **bold**."))
@@ -121,6 +121,64 @@ final class UlyssesExporterTests: XCTestCase {
 
         XCTAssertEqual(summary.archiveSheets, 0)
         XCTAssertFalse(markdown.contains("#ulysses/archive"))
+    }
+
+    func testOrdinaryInboxAndTrashGroupsDoNotBecomeFSNotesSystemLocations() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let groups = input.appendingPathComponent("Ubiquitous Library.ulstoragebackup/Content/Groups-ulgroup")
+        let inboxGroup = groups.appendingPathComponent("ordinary-inbox-ulgroup")
+        let trashGroup = groups.appendingPathComponent("ordinary-trash-ulgroup")
+        let inboxSheet = inboxGroup.appendingPathComponent("inbox-note.ulysses")
+        let trashSheet = trashGroup.appendingPathComponent("trash-note.ulysses")
+        try FileManager.default.createDirectory(at: inboxSheet, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: trashSheet, withIntermediateDirectories: true)
+        try writeInfo(displayName: "Inbox", to: inboxGroup.appendingPathComponent("Info.ulgroup"))
+        try writeInfo(displayName: "Trash", to: trashGroup.appendingPathComponent("Info.ulgroup"))
+        try titledSheet("Ordinary Inbox Note").write(to: inboxSheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+        try titledSheet("Ordinary Trash Note").write(to: trashSheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+
+        let output = root.appendingPathComponent("Output")
+        let summary = try await Exporter().run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+
+        XCTAssertEqual(summary.trashSheets, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("Inbox (Ulysses Group)/Ordinary Inbox Note.textbundle").path))
+        let markdown = try String(
+            contentsOf: output.appendingPathComponent("Trash (Ulysses Group)/Ordinary Trash Note.textbundle/text.markdown"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(markdown.contains("#ulysses/trash"))
+    }
+
+    func testNestedUlyssesTrashIsFlattenedIntoFSNotesTrashWithSourceOrderPreserved() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let group = input.appendingPathComponent("Ubiquitous Library.ulstoragebackup/Content/Trash-ultrash/deleted-project-ulgroup")
+        let first = group.appendingPathComponent("first.ulysses")
+        let second = group.appendingPathComponent("second.ulysses")
+        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
+        try writeInfo(
+            displayName: "Deleted Project",
+            sheetClusters: [["second.ulysses"], ["first.ulysses"]],
+            to: group.appendingPathComponent("Info.ulgroup")
+        )
+        try titledSheet("First Deleted Note").write(to: first.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+        try titledSheet("Second Deleted Note").write(to: second.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+
+        let output = root.appendingPathComponent("Output")
+        let summary = try await Exporter().run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+
+        XCTAssertEqual(summary.trashSheets, 2)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("Trash/First Deleted Note.textbundle").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("Trash/Second Deleted Note.textbundle").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: output.appendingPathComponent("Trash/Deleted Project").path))
+        let map = try String(
+            contentsOf: output.appendingPathComponent("_Ulysses Migration/Ulysses Library Map.textbundle/text.markdown"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(map.contains("Ulysses Sheet Order: Trash (Ulysses source: Trash / Deleted Project)"))
+        XCTAssertLessThan(map.range(of: "[Second Deleted Note]")!.lowerBound, map.range(of: "[First Deleted Note]")!.lowerBound)
     }
 
     func testWritesUlyssesSheetOrderNotesAndTagsGluedSheets() async throws {
@@ -305,6 +363,8 @@ final class UlyssesExporterTests: XCTestCase {
         XCTAssertTrue(reportMarkdown.contains("- Sheets: 2"))
         XCTAssertTrue(reportMarkdown.contains("- Template sheets: 1"))
         XCTAssertTrue(reportMarkdown.contains("- Trash sheets: 1"))
+        XCTAssertTrue(reportMarkdown.contains("## Finish In FSNotes"))
+        XCTAssertTrue(reportMarkdown.contains("FSNotes Empty Trash permanently deletes"))
 
         let reportData = try Data(contentsOf: output.appendingPathComponent(".export-ulysses/ulysses-export-report.json"))
         let report = try JSONSerialization.jsonObject(with: reportData) as? [String: Any]
@@ -326,7 +386,7 @@ final class UlyssesExporterTests: XCTestCase {
     func testReadsFavoritesPlistAndSavedFilters() async throws {
         let root = try temporaryDirectory()
         let input = root.appendingPathComponent("Backup.ulbackup")
-        let content = input.appendingPathComponent("Store.ulstoragebackup/Content")
+        let content = input.appendingPathComponent("Ubiquitous Library.ulstoragebackup/Content")
         let inbox = content.appendingPathComponent("Unfiled-ulgroup")
         let sheet = inbox.appendingPathComponent("favorite.ulysses")
         let filter = content.appendingPathComponent("published-ulfilter")
@@ -355,7 +415,7 @@ final class UlyssesExporterTests: XCTestCase {
 
         XCTAssertEqual(summary.favoriteSheets, 1)
         XCTAssertEqual(summary.savedFilters, 1)
-        let sheetMarkdown = try String(contentsOf: output.appendingPathComponent("Inbox/Favorite Sheet.textbundle/text.markdown"), encoding: .utf8)
+        let sheetMarkdown = try String(contentsOf: output.appendingPathComponent("Favorite Sheet.textbundle/text.markdown"), encoding: .utf8)
         XCTAssertTrue(sheetMarkdown.contains("#ulysses/favorite"))
         let favorites = try String(contentsOf: output.appendingPathComponent("_Ulysses Migration/Ulysses Favorites.textbundle/text.markdown"), encoding: .utf8)
         XCTAssertTrue(favorites.contains("[Favorite Sheet](fsnotes://find?id=Favorite%20Sheet)"))

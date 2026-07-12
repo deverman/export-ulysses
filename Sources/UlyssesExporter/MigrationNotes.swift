@@ -42,12 +42,17 @@ struct MigrationIndexWriter {
     private func orderSections(for entries: [SheetOrderEntry]) -> [[String]] {
         Dictionary(grouping: entries, by: { $0.sourceGroupURL.standardizedFileURL.path }).values.compactMap { groupEntries in
             guard let first = groupEntries.first,
-                  !first.groupPath.isEmpty,
                   let groupOrder = sheetOrderIndex.order(for: first.sourceGroupURL)
             else { return nil }
             let clusters = orderedEntries(groupEntries, using: groupOrder)
             guard clusters.flatMap({ $0 }).count > 1 else { return nil }
-            var lines = ["## Ulysses Sheet Order: \(first.groupPath.joined(separator: " / "))", ""]
+            let displayPath: String
+            if first.groupPath == ["Trash"], first.sourceGroupPath != ["Trash"] {
+                displayPath = "Trash (Ulysses source: \(first.sourceGroupPath.joined(separator: " / ")))"
+            } else {
+                displayPath = first.groupPath.isEmpty ? "Inbox" : first.groupPath.joined(separator: " / ")
+            }
+            var lines = ["## Ulysses Sheet Order: \(displayPath)", ""]
             if clusters.contains(where: { $0.count > 1 }) { lines += ["#ulysses/glued", ""] }
             for (index, cluster) in clusters.enumerated() {
                 if cluster.count == 1 {
@@ -94,7 +99,13 @@ struct MigrationIndexWriter {
                 childNames[child.groupURL.lastPathComponent] = child.metadata.displayName ?? child.groupPath.last ?? "Untitled group"
             }
             let outputPath = groupPathResolver.outputPath(for: group)
-            var lines = ["## Ulysses Metadata: \(outputPath.joined(separator: " / "))", ""]
+            let displayPath: String
+            if outputPath == ["Trash"], group.groupPath != ["Trash"] {
+                displayPath = "Trash (Ulysses source: \(group.groupPath.joined(separator: " / ")))"
+            } else {
+                displayPath = outputPath.isEmpty ? "Inbox" : outputPath.joined(separator: " / ")
+            }
+            var lines = ["## Ulysses Metadata: \(displayPath)", ""]
             if !roles.isEmpty { lines += [roles.sorted().map { "#ulysses/\($0.rawValue)" }.joined(separator: " "), ""] }
             if let icon = group.metadata.userIconName { lines.append("- Ulysses icon: \(icon)") }
             if let color = group.metadata.userTintColor { lines.append("- Ulysses color: \(color)") }

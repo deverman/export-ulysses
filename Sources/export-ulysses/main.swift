@@ -75,6 +75,11 @@ struct ExportUlysses: AsyncParsableCommand {
             .run(input: input, output: output, keepGroups: keepGroups, ignoring: ignore, commandLine: CommandLine.arguments)
         printSummary(summary)
         print("Wrote migration notes under _Ulysses Migration and support files under hidden .export-ulysses.")
+        let outputURL = URL(fileURLWithPath: output).standardizedFileURL
+        print("In FSNotes Settings > General, set Default Storage to \(outputURL.path).")
+        if summary.trashSheets > 0 {
+            print("In FSNotes Settings > Advanced, verify Trash points to \(outputURL.appendingPathComponent("Trash").path) before using Empty Trash.")
+        }
     }
 
     private func printAnalysis(_ analysis: ExportAnalysis) {

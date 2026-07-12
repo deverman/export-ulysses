@@ -181,6 +181,13 @@ public struct Exporter {
         do {
             let analysis = try await analyze(input: input, keepGroups: keepGroups, ignoring: ignoredGroups, commandLine: commandLine)
             checks.append(PreflightCheck(name: "Sheet discovery", status: .success, message: "Found \(analysis.summary.sheets) sheets."))
+            if analysis.summary.trashSheets > 0 {
+                checks.append(PreflightCheck(
+                    name: "FSNotes Trash",
+                    status: .warning,
+                    message: "\(analysis.summary.trashSheets) Ulysses Trash sheets will be written to <output>/Trash. Select the output as FSNotes' Default Storage and verify its Trash location before using Empty Trash."
+                ))
+            }
             if analysis.summary.missingMedia > 0 {
                 checks.append(PreflightCheck(name: "Asset links", status: .warning, message: "\(analysis.summary.missingMedia) media references could not be resolved. The export report will list their IDs without note contents."))
             } else {
@@ -725,6 +732,7 @@ struct SheetExporter {
             sourcePackageURL: item.source.packageURL,
             sourcePackageName: item.source.packageURL.lastPathComponent,
             sourceGroupURL: item.source.groupURL,
+            sourceGroupPath: item.source.groupPath,
             groupPath: groupPathResolver.outputPath(for: item.source),
             title: item.prepared.noteTitle,
             destinationName: destinationName,
@@ -799,6 +807,18 @@ func isUlyssesArchive(url: URL, groupPath: [String]) -> Bool {
     return store.localizedCaseInsensitiveCompare("Ubiquitous Library.ulstoragebackup") != .orderedSame
 }
 
+func isUlyssesInbox(url: URL, groupPath: [String]) -> Bool {
+    guard groupPath == ["Inbox"],
+          url.lastPathComponent == "Unfiled-ulgroup",
+          let store = url.pathComponents.first(where: { $0.hasSuffix(".ulstoragebackup") })
+    else { return false }
+    return store.localizedCaseInsensitiveCompare("Ubiquitous Library.ulstoragebackup") == .orderedSame
+}
+
+func isUlyssesTrash(url: URL) -> Bool {
+    url.pathComponents.contains("Trash-ultrash")
+}
+
 struct SheetExportResult: Sendable, Equatable {
     let summary: ExportSummary
     let orderEntry: SheetOrderEntry
@@ -810,25 +830,40 @@ struct GroupPathResolver: Sendable, Equatable {
     init(sheets: [SheetSource], groups: [GroupSource]) {
         var nodesByIdentity: [String: GroupNode] = [:]
         var identitiesBySourceGroup: [String: [String]] = [:]
+        var rootSourceGroups = Set<String>()
         let records = sheets.map { ($0.groupURL, $0.groupPath) }
             + groups.map { ($0.groupURL, $0.groupPath) }
 
         for (groupURL, groupPath) in records {
+            let sourceKey = groupURL.standardizedFileURL.path
+            if isUlyssesInbox(url: groupURL, groupPath: groupPath) {
+                identitiesBySourceGroup[sourceKey] = []
+                rootSourceGroups.insert(sourceKey)
+                continue
+            }
             var identities = Self.groupIdentities(for: groupURL)
             if identities.count == groupPath.count + 1,
                identities.first.map({ URL(fileURLWithPath: $0).pathExtension == "ulstoragebackup" }) == true {
                 identities.removeFirst()
             }
-            let sourceKey = groupURL.standardizedFileURL.path
             guard identities.count == groupPath.count else {
                 identitiesBySourceGroup[sourceKey] = []
                 continue
             }
             identitiesBySourceGroup[sourceKey] = identities
             for (depth, identity) in identities.enumerated() {
-                let displayName = depth == 0 && isUlyssesArchive(url: groupURL, groupPath: groupPath)
-                    ? "Archive (Ulysses)"
-                    : sanitizedFileName(groupPath[depth])
+                let originalName = sanitizedFileName(groupPath[depth])
+                let displayName: String
+                if depth == 0 && isUlyssesArchive(url: groupURL, groupPath: groupPath) {
+                    displayName = "Archive (Ulysses)"
+                } else if originalName.localizedCaseInsensitiveCompare("Trash") == .orderedSame,
+                          identity.components(separatedBy: "/").last != "Trash-ultrash" {
+                    displayName = "Trash (Ulysses Group)"
+                } else if depth == 0 && originalName.localizedCaseInsensitiveCompare("Inbox") == .orderedSame {
+                    displayName = "Inbox (Ulysses Group)"
+                } else {
+                    displayName = originalName
+                }
                 nodesByIdentity[identity] = GroupNode(
                     identity: identity,
                     parentIdentity: depth == 0 ? nil : identities[depth - 1],
@@ -874,6 +909,10 @@ struct GroupPathResolver: Sendable, Equatable {
         }
         pathsBySourceGroup = records.reduce(into: paths) { result, record in
             let sourceKey = record.0.standardizedFileURL.path
+            if rootSourceGroups.contains(sourceKey) {
+                result[sourceKey] = []
+                return
+            }
             let identities = identitiesBySourceGroup[sourceKey] ?? []
             let resolved = identities.last.flatMap { resolvedByIdentity[$0] }
                 ?? record.1.map(sanitizedFileName)
@@ -882,11 +921,13 @@ struct GroupPathResolver: Sendable, Equatable {
     }
 
     func outputPath(for source: SheetSource) -> [String] {
-        pathsBySourceGroup[source.groupURL.standardizedFileURL.path] ?? source.groupPath.map(sanitizedFileName)
+        if isUlyssesTrash(url: source.packageURL) { return ["Trash"] }
+        return pathsBySourceGroup[source.groupURL.standardizedFileURL.path] ?? source.groupPath.map(sanitizedFileName)
     }
 
     func outputPath(for group: GroupSource) -> [String] {
-        pathsBySourceGroup[group.groupURL.standardizedFileURL.path] ?? group.groupPath.map(sanitizedFileName)
+        if isUlyssesTrash(url: group.groupURL) { return ["Trash"] }
+        return pathsBySourceGroup[group.groupURL.standardizedFileURL.path] ?? group.groupPath.map(sanitizedFileName)
     }
 
     private static func groupIdentities(for groupURL: URL) -> [String] {
@@ -1029,6 +1070,7 @@ struct SheetOrderEntry: Sendable, Equatable {
     let sourcePackageURL: URL
     let sourcePackageName: String
     let sourceGroupURL: URL
+    let sourceGroupPath: [String]
     let groupPath: [String]
     let title: String
     let destinationName: String
@@ -1226,6 +1268,14 @@ struct ExportReportWriter {
             "- Ulysses inspector/sidebar UI placement",
             "- Ulysses group icons, colors, goals, and activity tracking as native FSNotes folder settings",
             "- Ulysses favorites as native FSNotes pins; favorites are tagged and listed in the migration companion instead",
+            "",
+            "## Finish In FSNotes",
+            "",
+            "1. In FSNotes Settings > General, select the export folder as Default Storage. Do not merely add it as an external folder.",
+            "2. In FSNotes Settings > Advanced, verify that Trash points to `<export folder>/Trash`, especially if FSNotes previously used a custom Trash location.",
+            "3. Restart FSNotes and confirm that Ulysses Inbox sheets appear in Inbox and \(summary.trashSheets) deleted Ulysses sheets appear in Trash.",
+            "",
+            "Warning: FSNotes Empty Trash permanently deletes the imported Ulysses Trash sheets.",
             "",
             "## Support File",
             "",

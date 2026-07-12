@@ -4,7 +4,7 @@ Exports a Ulysses 40 backup into FSNotes-readable TextBundle notes.
 
 This tool targets Ulysses 40 on macOS 26 Tahoe with Swift 6.3.2 or newer. It reads Ulysses backup packages (`.ulbackup`) instead of copying the iCloud Drive folder, because the backup `Content.xml` and `Info.ulgroup` files include Ulysses sidebar notes, comments, annotations, attachments, keywords, sheet order, glued sheets, material sheets, goals, group icons, and other migration metadata.
 
-## Migrate In 3 Steps
+## Migrate In 4 Steps
 
 1. Build or run the tool:
 
@@ -24,7 +24,7 @@ This tool targets Ulysses 40 on macOS 26 Tahoe with Swift 6.3.2 or newer. It rea
      --analyze
    ```
 
-3. Export to a new FSNotes folder:
+3. Export to a new empty FSNotes storage folder:
 
    ```sh
    swift run export-ulysses \
@@ -34,7 +34,11 @@ This tool targets Ulysses 40 on macOS 26 Tahoe with Swift 6.3.2 or newer. It rea
      --jobs 2
    ```
 
-Then add `FSNotesImport` as an FSNotes folder. Migration-only notes are kept together under `_Ulysses Migration`; after reviewing them, you can disable **Show notes in Notes and Todo lists** for that one FSNotes folder. Hidden machine-readable files are written under `.export-ulysses`.
+4. In FSNotes, open **Settings > General** and select `FSNotesImport` as **Default Storage**. Do not merely add it as an external folder. Then open **Settings > Advanced** and verify that **Trash** points to `FSNotesImport/Trash`, particularly if FSNotes previously used a custom Trash location. Restart FSNotes after changing storage.
+
+FSNotes may ask whether to move notes from its previous storage location. Back up those existing notes first, then choose whether to merge them into the migration based on your own FSNotes setup.
+
+With this storage-root mapping, Ulysses Inbox sheets appear in FSNotes Inbox and Ulysses Trash sheets appear in FSNotes Trash. Migration-only notes are kept together under `_Ulysses Migration`; after reviewing them, you can disable **Show notes in Notes and Todo lists** for that folder. Hidden machine-readable files are written under `.export-ulysses`.
 
 The output folder must be empty. This prevents an accidental second run from silently creating thousands of duplicate notes with numeric suffixes.
 
@@ -67,7 +71,9 @@ Options:
 | Keywords | Written as visible FSNotes-searchable hashtags |
 | Material sheets | Tagged `#ulysses/material` |
 | Glued sheets | Tagged `#ulysses/glued` and shown as clusters in the consolidated library map |
-| Archive, Templates, Trash | Preserved as folders and tagged `#ulysses/archive`, `#ulysses/template`, or `#ulysses/trash` |
+| Inbox | Written directly to the FSNotes storage root so sheets appear in FSNotes Inbox |
+| Trash | All deleted sheets are flattened directly into reserved `Trash/` so FSNotes can display them; original project/group hierarchy remains in the library map and manifest |
+| Archive and Templates | Preserved as folders and tagged `#ulysses/archive` or `#ulysses/template` |
 | Favorites | Read from Ulysses `Content/favorites`, tagged `#ulysses/favorite`, and listed in `Ulysses Favorites` |
 | Saved filters | Filter names, scopes, status, and query conditions are listed in `Ulysses Saved Filters` |
 | Group icons, colors, goals, activity counts | Consolidated into `Ulysses Group Metadata` |
@@ -93,6 +99,17 @@ Example.textbundle/
 
 `info.json` follows TextBundle v2 and includes FSNotes-friendly fields such as `flatExtension`, `created`, and `modified`.
 
+The export root is an FSNotes storage root, not merely an external folder:
+
+```text
+FSNotesImport/
+  Ulysses Inbox Sheet.textbundle/
+  Trash/
+    Deleted Ulysses Sheet.textbundle/
+  Archive (Ulysses)/
+  _Ulysses Migration/
+```
+
 The companion folder contains at most these five notes:
 
 - `Ulysses Export Report`
@@ -110,6 +127,9 @@ The companion folder contains at most these five notes:
 - If FSNotes preview does not show an image, check whether the image appears in `assets/` and whether the Markdown link starts with `assets/`.
 - Duplicate Ulysses titles are preserved as separate TextBundles with numeric suffixes. The report counts how many were renamed.
 - The special Ulysses archive is exported as `Archive (Ulysses)`, so an ordinary user-created group named `Archive` can keep its natural name. Opaque source IDs remain only in the hidden manifest.
+- Do not add the export as an external FSNotes folder. It must be selected as Default Storage for root-level sheets and `Trash/` to receive FSNotes Inbox and Trash semantics.
+- FSNotes Empty Trash permanently deletes imported Ulysses Trash sheets. Review the migration report before emptying it.
+- FSNotes Trash does not support nested projects, so nested and project-specific Ulysses Trash sheets are flattened into `Trash/`; deterministic filenames prevent collisions and the original hierarchy remains recorded.
 - If the output-folder check fails, choose a new empty folder. The exporter intentionally does not append to or overwrite an earlier migration.
 - Missing media references are preserved as report entries with the affected note title and reference. Bare filenames usually mean an imported/local image was never stored in the Ulysses package. Mobile `file://` references usually point to transient iOS app storage and cannot be recovered from a Ulysses backup.
 - The support report intentionally excludes note text. Share `.export-ulysses/ulysses-export-report.json` when filing a bug, not your Ulysses backup.
@@ -125,6 +145,8 @@ Validated against:
 Recent dry-run validation found:
 
 - 2,631 sheets
+- 543 Inbox sheets written directly to the FSNotes storage root
+- 1,051 deleted sheets written directly to FSNotes `Trash/`
 - 265 sidebar notes
 - 55 sidebar file attachments
 - 601 inline images
@@ -136,6 +158,7 @@ Recent dry-run validation found:
 - 1 active saved filter, with deleted filters retained in the migration record
 - 1 consolidated sheet-order note
 - 1 consolidated group-metadata note
+- 216 duplicate note filenames renamed deterministically, including collisions created by flattening FSNotes Trash
 - 31 missing media references
 - 0 unsupported XML nodes
 
