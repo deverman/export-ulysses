@@ -12,6 +12,7 @@ public struct ExportSummary: Sendable, Equatable, Codable {
     public var templateSheets = 0
     public var trashSheets = 0
     public var favoriteSheets = 0
+    public var savedFilters = 0
     public var orderNotes = 0
     public var metadataNotes = 0
     public var reportNotes = 0
@@ -34,6 +35,7 @@ public struct ExportSummary: Sendable, Equatable, Codable {
         templateSheets += other.templateSheets
         trashSheets += other.trashSheets
         favoriteSheets += other.favoriteSheets
+        savedFilters += other.savedFilters
         orderNotes += other.orderNotes
         metadataNotes += other.metadataNotes
         reportNotes += other.reportNotes
@@ -108,6 +110,7 @@ public struct Exporter {
     public func run(input: String, output: String, keepGroups: Bool, ignoring ignoredGroups: [String], commandLine: [String] = []) async throws -> ExportSummary {
         let inputURL = URL(fileURLWithPath: input)
         let outputURL = URL(fileURLWithPath: output)
+        try requireEmptyOutput(outputURL)
         try FileManager.default.createDirectory(at: outputURL, withIntermediateDirectories: true)
 
         let snapshot = try UlyssesBackupReader().readLibrary(
@@ -127,7 +130,8 @@ public struct Exporter {
 
         let mediaIndex = MediaIndex(sheets: sheets)
         let sheetOrderIndex = SheetOrderIndex(sheets: sheets)
-        return try await export(snapshot, to: outputURL, mediaIndex: mediaIndex, sheetOrderIndex: sheetOrderIndex, commandLine: commandLine)
+        let groupPathResolver = GroupPathResolver(sheets: sheets, groups: snapshot.groups)
+        return try await export(snapshot, to: outputURL, mediaIndex: mediaIndex, sheetOrderIndex: sheetOrderIndex, groupPathResolver: groupPathResolver, commandLine: commandLine)
     }
 
     public func analyze(input: String, keepGroups: Bool, ignoring ignoredGroups: [String], commandLine: [String] = []) async throws -> ExportAnalysis {
@@ -143,7 +147,8 @@ public struct Exporter {
 
         let mediaIndex = MediaIndex(sheets: snapshot.sheets)
         let sheetOrderIndex = SheetOrderIndex(sheets: snapshot.sheets)
-        return try await analyze(snapshot, mediaIndex: mediaIndex, sheetOrderIndex: sheetOrderIndex, commandLine: commandLine)
+        let groupPathResolver = GroupPathResolver(sheets: snapshot.sheets, groups: snapshot.groups)
+        return try await analyze(snapshot, mediaIndex: mediaIndex, sheetOrderIndex: sheetOrderIndex, groupPathResolver: groupPathResolver, commandLine: commandLine)
     }
 
     public func doctor(input: String, output: String?, keepGroups: Bool, ignoring ignoredGroups: [String], commandLine: [String] = []) async -> PreflightResult {
@@ -193,88 +198,96 @@ public struct Exporter {
         }
     }
 
-    private func export(_ snapshot: UlyssesLibrarySnapshot, to outputURL: URL, mediaIndex: MediaIndex, sheetOrderIndex: SheetOrderIndex, commandLine: [String]) async throws -> ExportSummary {
-        let sheets = snapshot.sheets
-        return try await withThrowingTaskGroup(of: SheetExportResult.self) { group in
-            var nextSheetIndex = 0
+    private func export(_ snapshot: UlyssesLibrarySnapshot, to outputURL: URL, mediaIndex: MediaIndex, sheetOrderIndex: SheetOrderIndex, groupPathResolver: GroupPathResolver, commandLine: [String]) async throws -> ExportSummary {
+        let sheetExporter = SheetExporter(
+            mediaIndex: mediaIndex,
+            sheetOrderIndex: sheetOrderIndex,
+            favoriteSheetPaths: snapshot.favoriteSheetPaths,
+            groupPathResolver: groupPathResolver
+        )
+        let prepared = try await process(snapshot.sheets) { try sheetExporter.prepare($0) }
+        let names = OutputNameResolver(prepared: prepared, groupPaths: groupPathResolver)
+        let results = try await process(prepared) { item in
+            try sheetExporter.export(item, named: names.name(for: item.source), to: outputURL)
+        }
+        var (summary, orderEntries) = aggregate(results)
+        if verbose { print("Exported \(results.count) sheets.") }
+        let indexCounts = try MigrationIndexWriter(
+            sheetOrderIndex: sheetOrderIndex,
+            groupPathResolver: groupPathResolver,
+            outputURL: outputURL
+        ).write(entries: orderEntries, groups: snapshot.groups)
+        summary.orderNotes = indexCounts.orderNotes
+        summary.metadataNotes = indexCounts.metadataNotes
+        summary.savedFilters = snapshot.filters.filter { !$0.isInTrash }.count
+        summary.reportNotes = 1
+        try LibraryCompanionWriter(outputURL: outputURL, groupPathResolver: groupPathResolver).write(
+            snapshot: snapshot,
+            entries: orderEntries,
+            summary: summary
+        )
+        try ExportReportWriter(outputURL: outputURL).writeReport(
+            summary: summary,
+            snapshot: snapshot,
+            commandLine: commandLine
+        )
+        return summary
+    }
 
-            func enqueueNextSheet() {
-                guard nextSheetIndex < sheets.count else { return }
-                let sheet = sheets[nextSheetIndex]
-                nextSheetIndex += 1
-                group.addTask {
-                    try SheetExporter(mediaIndex: mediaIndex, sheetOrderIndex: sheetOrderIndex).export(sheet, to: outputURL)
-                }
+    private func analyze(_ snapshot: UlyssesLibrarySnapshot, mediaIndex: MediaIndex, sheetOrderIndex: SheetOrderIndex, groupPathResolver: GroupPathResolver, commandLine: [String]) async throws -> ExportAnalysis {
+        let sheetExporter = SheetExporter(
+            mediaIndex: mediaIndex,
+            sheetOrderIndex: sheetOrderIndex,
+            favoriteSheetPaths: snapshot.favoriteSheetPaths,
+            groupPathResolver: groupPathResolver
+        )
+        let prepared = try await process(snapshot.sheets) { try sheetExporter.prepare($0) }
+        let names = OutputNameResolver(prepared: prepared, groupPaths: groupPathResolver)
+        let results = prepared.map { sheetExporter.analyze($0, named: names.name(for: $0.source)) }
+        var (summary, orderEntries) = aggregate(results)
+        let indexCounts = MigrationIndexWriter(
+            sheetOrderIndex: sheetOrderIndex,
+            groupPathResolver: groupPathResolver,
+            outputURL: URL(fileURLWithPath: "/")
+        )
+            .counts(entries: orderEntries, groups: snapshot.groups)
+        summary.orderNotes = indexCounts.orderNotes
+        summary.metadataNotes = indexCounts.metadataNotes
+        summary.savedFilters = snapshot.filters.filter { !$0.isInTrash }.count
+        summary.reportNotes = 1
+
+        let writer = ExportReportWriter(outputURL: URL(fileURLWithPath: "/"))
+        return try ExportAnalysis(
+            summary: summary,
+            reportMarkdown: writer.reportMarkdown(summary: summary, snapshot: snapshot, commandLine: commandLine),
+            supportJSON: writer.supportJSON(summary: summary, snapshot: snapshot, commandLine: commandLine)
+        )
+    }
+
+    private func process<Input: Sendable, Result: Sendable>(
+        _ inputs: [Input],
+        operation: @escaping @Sendable (Input) throws -> Result
+    ) async throws -> [Result] {
+        try await withThrowingTaskGroup(of: Result.self) { group in
+            var iterator = inputs.makeIterator()
+            for _ in 0..<min(maxConcurrentExports, inputs.count) {
+                if let input = iterator.next() { group.addTask { try operation(input) } }
             }
 
-            for _ in 0..<min(maxConcurrentExports, sheets.count) {
-                enqueueNextSheet()
-            }
-
-            var summary = ExportSummary()
-            var orderEntries: [SheetOrderEntry] = []
-            var exported = 0
+            var results: [Result] = []
+            results.reserveCapacity(inputs.count)
             for try await result in group {
-                exported += 1
-                summary.add(result.summary)
-                orderEntries.append(result.orderEntry)
-                enqueueNextSheet()
-                if verbose, exported % 100 == 0 {
-                    print("Exported \(exported) sheets.")
-                }
+                results.append(result)
+                if let input = iterator.next() { group.addTask { try operation(input) } }
             }
-            summary.orderNotes = try SheetOrderNoteWriter(
-                sheetOrderIndex: sheetOrderIndex,
-                outputURL: outputURL
-            ).writeOrderNotes(for: orderEntries)
-            summary.metadataNotes = try GroupMetadataNoteWriter(outputURL: outputURL)
-                .writeMetadataNotes(for: snapshot.groups)
-            summary.reportNotes = 1
-            try ExportReportWriter(outputURL: outputURL).writeReport(
-                summary: summary,
-                snapshot: snapshot,
-                commandLine: commandLine
-            )
-            return summary
+            return results
         }
     }
 
-    private func analyze(_ snapshot: UlyssesLibrarySnapshot, mediaIndex: MediaIndex, sheetOrderIndex: SheetOrderIndex, commandLine: [String]) async throws -> ExportAnalysis {
-        let sheets = snapshot.sheets
-        return try await withThrowingTaskGroup(of: SheetExportResult.self) { group in
-            for sheet in sheets {
-                group.addTask {
-                    try SheetExporter(mediaIndex: mediaIndex, sheetOrderIndex: sheetOrderIndex).analyze(sheet)
-                }
-            }
-
-            var summary = ExportSummary()
-            var orderEntries: [SheetOrderEntry] = []
-            for try await result in group {
-                summary.add(result.summary)
-                orderEntries.append(result.orderEntry)
-            }
-            summary.orderNotes = SheetOrderNoteWriter(sheetOrderIndex: sheetOrderIndex, outputURL: URL(fileURLWithPath: "/"))
-                .countOrderNotes(for: orderEntries)
-            summary.metadataNotes = GroupMetadataNoteWriter(outputURL: URL(fileURLWithPath: "/"))
-                .countMetadataNotes(for: snapshot.groups)
-            summary.reportNotes = 1
-            summary.duplicateTitles = estimatedDuplicateTitles(for: orderEntries)
-
-            let writer = ExportReportWriter(outputURL: URL(fileURLWithPath: "/"))
-            let markdown = writer.reportMarkdown(summary: summary, snapshot: snapshot, commandLine: commandLine)
-            let supportJSON = try writer.supportJSON(summary: summary, snapshot: snapshot, commandLine: commandLine)
-            return ExportAnalysis(summary: summary, reportMarkdown: markdown, supportJSON: supportJSON)
-        }
-    }
-
-    private func estimatedDuplicateTitles(for entries: [SheetOrderEntry]) -> Int {
-        var counts: [String: Int] = [:]
-        for entry in entries {
-            let path = (entry.groupPath + [entry.destinationName]).joined(separator: "/").lowercased()
-            counts[path, default: 0] += 1
-        }
-        return counts.values.reduce(0) { total, count in total + max(0, count - 1) }
+    private func aggregate(_ results: [SheetExportResult]) -> (ExportSummary, [SheetOrderEntry]) {
+        var summary = ExportSummary()
+        for result in results { summary.add(result.summary) }
+        return (summary, results.map(\.orderEntry))
     }
 
     private func outputCheck(for outputURL: URL) -> PreflightCheck {
@@ -284,18 +297,31 @@ public struct Exporter {
                 return PreflightCheck(name: "Output folder", status: .failure, message: "\(outputURL.path) exists and is not a directory.")
             }
             let contents = (try? FileManager.default.contentsOfDirectory(atPath: outputURL.path)) ?? []
-            let status: PreflightCheck.Status = contents.isEmpty ? .success : .warning
-            let message = contents.isEmpty
+            let meaningfulContents = contents.filter { $0 != ".DS_Store" }
+            let status: PreflightCheck.Status = meaningfulContents.isEmpty ? .success : .failure
+            let message = meaningfulContents.isEmpty
                 ? "Output directory exists and is empty."
-                : "Output directory exists and is not empty; duplicate note names will receive numeric suffixes."
+                : "Output directory is not empty. Choose a new empty folder so an earlier migration is never duplicated or overwritten."
             return PreflightCheck(name: "Output folder", status: status, message: message)
         }
 
-        let parent = outputURL.deletingLastPathComponent()
+        var parent = outputURL.deletingLastPathComponent()
+        while !FileManager.default.fileExists(atPath: parent.path), parent.path != "/" {
+            parent.deleteLastPathComponent()
+        }
         if FileManager.default.isWritableFile(atPath: parent.path) {
-            return PreflightCheck(name: "Output folder", status: .success, message: "Output directory can be created under \(parent.path).")
+            return PreflightCheck(name: "Output folder", status: .success, message: "Output directory can be created from writable parent \(parent.path).")
         }
         return PreflightCheck(name: "Output folder", status: .failure, message: "Cannot write to \(parent.path). Choose a writable destination.")
+    }
+
+    private func requireEmptyOutput(_ outputURL: URL) throws {
+        var isDirectory = ObjCBool(false)
+        guard FileManager.default.fileExists(atPath: outputURL.path, isDirectory: &isDirectory) else { return }
+        guard isDirectory.boolValue else { throw ExportError.outputNotDirectory(outputURL.path) }
+        let contents = try FileManager.default.contentsOfDirectory(atPath: outputURL.path)
+            .filter { $0 != ".DS_Store" }
+        guard contents.isEmpty else { throw ExportError.outputNotEmpty(outputURL.path) }
     }
 }
 
@@ -303,6 +329,9 @@ public enum ExportError: Error, LocalizedError {
     case noSheetsFound(String)
     case invalidXML(String)
     case contentOpenFailed(String, String)
+    case outputNotDirectory(String)
+    case outputNotEmpty(String)
+    case destinationCollision(String)
 
     public var errorDescription: String? {
         switch self {
@@ -312,6 +341,12 @@ public enum ExportError: Error, LocalizedError {
             "Could not parse Ulysses Content.xml at \(path)."
         case .contentOpenFailed(let path, let reason):
             "Could not open Ulysses Content.xml at \(path): \(reason)"
+        case .outputNotDirectory(let path):
+            "The output path \(path) exists and is not a directory. Choose a new empty output folder."
+        case .outputNotEmpty(let path):
+            "The output folder \(path) is not empty. Choose a new empty folder, or remove the previous migration after reviewing it."
+        case .destinationCollision(let path):
+            "Two exported items resolved to \(path). This is an exporter naming error; run with --analyze and include the support report in a bug report."
         }
     }
 }
@@ -327,6 +362,15 @@ public struct UlyssesLibrarySnapshot: Sendable, Equatable {
     public let rootURL: URL
     public let sheets: [SheetSource]
     public let groups: [GroupSource]
+    public let favoriteSheetPaths: Set<String>
+    public let filters: [UlyssesFilter]
+}
+
+public struct UlyssesFilter: Sendable, Equatable {
+    public let name: String
+    public let groupPath: [String]
+    public let queryDescription: String
+    public let isInTrash: Bool
 }
 
 public struct GroupSource: Sendable, Equatable {
@@ -358,9 +402,16 @@ public struct UlyssesGroupMetadata: Sendable, Equatable {
 struct UlyssesBackupReader {
     func readLibrary(in inputURL: URL, keepGroups: Bool, ignoring ignoredGroups: Set<String>) throws -> UlyssesLibrarySnapshot {
         let root = inputURL.standardizedFileURL
-        let sheets = try findSheets(in: root, keepGroups: keepGroups, ignoring: ignoredGroups)
-        let groups = findGroups(in: root, keepGroups: keepGroups, ignoring: ignoredGroups)
-        return UlyssesLibrarySnapshot(rootURL: root, sheets: sheets, groups: groups)
+        let normalizedIgnoredGroups = Set(ignoredGroups.map(Self.normalizedGroupName))
+        let sheets = try findSheets(in: root, keepGroups: keepGroups, ignoring: normalizedIgnoredGroups)
+        let groups = findGroups(in: root, keepGroups: keepGroups, ignoring: normalizedIgnoredGroups)
+        return UlyssesLibrarySnapshot(
+            rootURL: root,
+            sheets: sheets,
+            groups: groups,
+            favoriteSheetPaths: findFavoriteSheetPaths(in: root),
+            filters: findFilters(in: root, keepGroups: keepGroups, ignoring: normalizedIgnoredGroups)
+        )
     }
 
     func findSheets(in inputURL: URL, keepGroups: Bool, ignoring ignoredGroups: Set<String>) throws -> [SheetSource] {
@@ -381,11 +432,12 @@ struct UlyssesBackupReader {
             let contentURL = url.appendingPathComponent("Content.xml")
             guard FileManager.default.isReadableFile(atPath: contentURL.path) else { continue }
 
-            let groupPath = keepGroups ? groupPath(forDirectoryAt: url.deletingLastPathComponent(), root: root, ignoring: ignoredGroups) : []
-            if groupPath.contains(where: ignoredGroups.contains) {
+            let sourceGroupPath = groupPath(forDirectoryAt: url.deletingLastPathComponent(), root: root)
+            if sourceGroupPath.contains(where: { ignoredGroups.contains(Self.normalizedGroupName($0)) }) {
                 enumerator.skipDescendants()
                 continue
             }
+            let groupPath = keepGroups ? sourceGroupPath : []
 
             sheets.append(SheetSource(packageURL: url, contentURL: contentURL, groupURL: url.deletingLastPathComponent(), groupPath: groupPath))
             enumerator.skipDescendants()
@@ -410,8 +462,10 @@ struct UlyssesBackupReader {
         for case let url as URL in enumerator {
             guard url.lastPathComponent == "Info.ulgroup" else { continue }
             let groupURL = url.deletingLastPathComponent()
-            let groupPath = groupPath(forDirectoryAt: groupURL, root: inputURL, ignoring: ignoredGroups)
-            guard !groupPath.isEmpty, !groupPath.contains(where: ignoredGroups.contains) else { continue }
+            let groupPath = groupPath(forDirectoryAt: groupURL, root: inputURL)
+            guard !groupPath.isEmpty,
+                  !groupPath.contains(where: { ignoredGroups.contains(Self.normalizedGroupName($0)) })
+            else { continue }
             let standardizedPath = groupURL.standardizedFileURL.path
             guard !seen.contains(standardizedPath), let metadata = metadata(forGroupInfoAt: url) else { continue }
             seen.insert(standardizedPath)
@@ -428,7 +482,7 @@ struct UlyssesBackupReader {
         return groups.sorted { $0.groupPath.lexicographicallyPrecedes($1.groupPath) }
     }
 
-    private func groupPath(forDirectoryAt directoryURL: URL, root: URL, ignoring ignoredGroups: Set<String>) -> [String] {
+    private func groupPath(forDirectoryAt directoryURL: URL, root: URL) -> [String] {
         let rootPath = root.standardizedFileURL.path
         let parentPath = directoryURL.standardizedFileURL.path
         let relativePath: String
@@ -466,7 +520,77 @@ struct UlyssesBackupReader {
             guard component.hasSuffix("-ulgroup") else { continue }
             groups.append(displayName(forGroupAt: current) ?? component.replacingOccurrences(of: "-ulgroup", with: ""))
         }
-        return groups.filter { !ignoredGroups.contains($0) }
+        return groups
+    }
+
+    private func findFavoriteSheetPaths(in root: URL) -> Set<String> {
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        var favorites = Set<String>()
+        for case let url as URL in enumerator where url.lastPathComponent == "favorites" {
+            guard url.deletingLastPathComponent().lastPathComponent == "Content",
+                  let data = try? Data(contentsOf: url),
+                  let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+                  let order = plist["order"] as? [String]
+            else { continue }
+
+            let contentURL = url.deletingLastPathComponent()
+            favorites.formUnion(order.map {
+                contentURL.appendingPathComponent($0).standardizedFileURL.path
+            })
+        }
+        return favorites
+    }
+
+    private func findFilters(in root: URL, keepGroups: Bool, ignoring ignoredGroups: Set<String>) -> [UlyssesFilter] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        var filters: [UlyssesFilter] = []
+        for case let url as URL in enumerator where url.lastPathComponent == "Info.ulfilter" {
+            let filterURL = url.deletingLastPathComponent()
+            let sourcePath = groupPath(forDirectoryAt: filterURL.deletingLastPathComponent(), root: root)
+            guard !sourcePath.contains(where: { ignoredGroups.contains(Self.normalizedGroupName($0)) }),
+                  let data = try? Data(contentsOf: url),
+                  let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+            else { continue }
+
+            let name = plist["displayName"] as? String
+                ?? filterURL.lastPathComponent.replacingOccurrences(of: "-ulfilter", with: "")
+            let query = plist["query"].map(Self.describePlist) ?? "Unavailable"
+            filters.append(UlyssesFilter(
+                name: name,
+                groupPath: keepGroups ? sourcePath : [],
+                queryDescription: query,
+                isInTrash: filterURL.pathComponents.contains("Trash-ultrash")
+            ))
+            enumerator.skipDescendants()
+        }
+        return filters.sorted {
+            ($0.groupPath + [$0.name]).lexicographicallyPrecedes($1.groupPath + [$1.name])
+        }
+    }
+
+    private static func describePlist(_ value: Any) -> String {
+        switch value {
+        case let dictionary as [String: Any]:
+            return dictionary.keys.sorted().map { "\($0): \(describePlist(dictionary[$0]!))" }.joined(separator: "; ")
+        case let array as [Any]:
+            return array.map(describePlist).joined(separator: ", ")
+        default:
+            return String(describing: value)
+        }
+    }
+
+    private static func normalizedGroupName(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private func relativePath(for url: URL, root: URL) -> String {
@@ -511,52 +635,76 @@ struct UlyssesBackupReader {
 struct SheetExporter {
     let mediaIndex: MediaIndex
     let sheetOrderIndex: SheetOrderIndex
+    let favoriteSheetPaths: Set<String>
+    let groupPathResolver: GroupPathResolver
 
-    func export(_ source: SheetSource, to outputRoot: URL) throws -> SheetExportResult {
-        let prepared = try prepare(source)
-        var summary = prepared.rendered.summary
-        summary.sheets = 1
-        summary.sidebarNotes = prepared.sheet.sidebarNotes.count
-        summary.fileAttachments = prepared.sheet.fileAttachmentIDs.count
-        summary.keywords = prepared.sheet.keywords.count
-        summary.materialSheets = prepared.sheet.isMaterial ? 1 : 0
-        summary.gluedSheets = prepared.isGlued ? 1 : 0
-        summary.archiveSheets = prepared.roles.contains(.archive) ? 1 : 0
-        summary.templateSheets = prepared.roles.contains(.template) ? 1 : 0
-        summary.trashSheets = prepared.roles.contains(.trash) ? 1 : 0
-        summary.favoriteSheets = prepared.sheet.isFavorite ? 1 : 0
-        summary.annotateMissingMedia(sourceTitle: prepared.noteTitle)
-
+    func export(_ item: PreparedSheetSource, named outputName: String, to outputRoot: URL) throws -> SheetExportResult {
+        let source = item.source
+        let prepared = item.prepared
+        var summary = summary(for: item)
         var destinationDirectory = outputRoot
-        for group in source.groupPath {
+        let outputGroupPath = groupPathResolver.outputPath(for: source)
+        for group in outputGroupPath {
             destinationDirectory.appendPathComponent(sanitizedFileName(group))
         }
-        let writeResult = try TextBundleWriter().writeBundle(
-            named: prepared.bundleName,
+        let bundleURL = try TextBundleWriter().writeBundle(
+            named: outputName,
             markdown: prepared.rendered.markdown,
             media: prepared.rendered.media,
             in: destinationDirectory,
             dates: prepared.dates
         )
-        if writeResult.usedDuplicateName {
-            summary.duplicateTitles += 1
-        }
+        if outputName != prepared.bundleName { summary.duplicateTitles = 1 }
 
         return SheetExportResult(
             summary: summary,
-            orderEntry: SheetOrderEntry(
-                sourcePackageName: source.packageURL.lastPathComponent,
-                sourceGroupURL: source.groupURL,
-                groupPath: source.groupPath,
-                title: prepared.noteTitle,
-                destinationName: writeResult.bundleURL.lastPathComponent,
-                dates: prepared.dates
+            orderEntry: orderEntry(for: item, destinationName: bundleURL.lastPathComponent)
+        )
+    }
+
+    func analyze(_ item: PreparedSheetSource, named outputName: String) -> SheetExportResult {
+        let prepared = item.prepared
+        var summary = summary(for: item)
+        if outputName != prepared.bundleName { summary.duplicateTitles = 1 }
+        return SheetExportResult(
+            summary: summary,
+            orderEntry: orderEntry(for: item, destinationName: outputName + ".textbundle")
+        )
+    }
+
+    func prepare(_ source: SheetSource) throws -> PreparedSheetSource {
+        let data = try readDataWithRetry(from: source.contentURL)
+        var sheet = try UlyssesSheetParser(contentURL: source.contentURL).parse(data)
+        let roles = migrationRoles(for: source)
+        let isGlued = sheetOrderIndex.clusterInfo(for: source)?.isGlued == true
+        let favorite = isFavorite(source, sheet: sheet)
+        sheet.migrationTags.append(contentsOf: migrationTags(
+            for: source,
+            sheet: sheet,
+            roles: roles,
+            isGlued: isGlued,
+            isFavorite: favorite
+        ))
+        let rendered = MarkdownRenderer(
+            mediaResolver: MediaResolver(packageURL: source.packageURL, mediaIndex: mediaIndex)
+        ).render(sheet)
+        let name = rendered.title.isEmpty ? source.packageURL.deletingPathExtension().lastPathComponent : rendered.title
+        return PreparedSheetSource(
+            source: source,
+            prepared: PreparedSheetExport(
+                sheet: sheet,
+                rendered: rendered,
+                bundleName: sanitizedFileName(name),
+                dates: sheetDates(for: source),
+                roles: roles,
+                isGlued: isGlued,
+                isFavorite: favorite
             )
         )
     }
 
-    func analyze(_ source: SheetSource) throws -> SheetExportResult {
-        let prepared = try prepare(source)
+    private func summary(for item: PreparedSheetSource) -> ExportSummary {
+        let prepared = item.prepared
         var summary = prepared.rendered.summary
         summary.sheets = 1
         summary.sidebarNotes = prepared.sheet.sidebarNotes.count
@@ -567,40 +715,21 @@ struct SheetExporter {
         summary.archiveSheets = prepared.roles.contains(.archive) ? 1 : 0
         summary.templateSheets = prepared.roles.contains(.template) ? 1 : 0
         summary.trashSheets = prepared.roles.contains(.trash) ? 1 : 0
-        summary.favoriteSheets = prepared.sheet.isFavorite ? 1 : 0
+        summary.favoriteSheets = prepared.isFavorite ? 1 : 0
         summary.annotateMissingMedia(sourceTitle: prepared.noteTitle)
-
-        return SheetExportResult(
-            summary: summary,
-            orderEntry: SheetOrderEntry(
-                sourcePackageName: source.packageURL.lastPathComponent,
-                sourceGroupURL: source.groupURL,
-                groupPath: source.groupPath,
-                title: prepared.noteTitle,
-                destinationName: prepared.bundleName + ".textbundle",
-                dates: prepared.dates
-            )
-        )
+        return summary
     }
 
-    private func prepare(_ source: SheetSource) throws -> PreparedSheetExport {
-        let data = try readDataWithRetry(from: source.contentURL)
-        var sheet = try UlyssesSheetParser(contentURL: source.contentURL).parse(data)
-        let roles = migrationRoles(for: source)
-        let isGlued = sheetOrderIndex.clusterInfo(for: source)?.isGlued == true
-        sheet.migrationTags.append(contentsOf: migrationTags(for: source, sheet: sheet, roles: roles, isGlued: isGlued))
-        let renderer = MarkdownRenderer(mediaResolver: MediaResolver(packageURL: source.packageURL, mediaIndex: mediaIndex))
-        let rendered = renderer.render(sheet)
-
-        let bundleName = sanitizedFileName(rendered.title.isEmpty ? source.packageURL.deletingPathExtension().lastPathComponent : rendered.title)
-        let dates = sheetDates(for: source)
-        return PreparedSheetExport(
-            sheet: sheet,
-            rendered: rendered,
-            bundleName: bundleName,
-            dates: dates,
-            roles: roles,
-            isGlued: isGlued
+    private func orderEntry(for item: PreparedSheetSource, destinationName: String) -> SheetOrderEntry {
+        SheetOrderEntry(
+            sourcePackageURL: item.source.packageURL,
+            sourcePackageName: item.source.packageURL.lastPathComponent,
+            sourceGroupURL: item.source.groupURL,
+            groupPath: groupPathResolver.outputPath(for: item.source),
+            title: item.prepared.noteTitle,
+            destinationName: destinationName,
+            favorite: item.prepared.isFavorite,
+            dates: item.prepared.dates
         )
     }
 
@@ -630,7 +759,7 @@ struct SheetExporter {
         return SheetDates(created: created, modified: modified)
     }
 
-    private func migrationTags(for source: SheetSource, sheet: UlyssesSheet, roles: Set<UlyssesRole>, isGlued: Bool) -> [String] {
+    private func migrationTags(for source: SheetSource, sheet: UlyssesSheet, roles: Set<UlyssesRole>, isGlued: Bool, isFavorite: Bool) -> [String] {
         var tags: [String] = []
         if sheet.isMaterial {
             tags.append("ulysses/material")
@@ -638,7 +767,7 @@ struct SheetExporter {
         if isGlued {
             tags.append("ulysses/glued")
         }
-        if sheet.isFavorite {
+        if isFavorite {
             tags.append("ulysses/favorite")
         }
         for role in roles.sorted(by: { $0.rawValue < $1.rawValue }) {
@@ -648,8 +777,26 @@ struct SheetExporter {
     }
 
     private func migrationRoles(for source: SheetSource) -> Set<UlyssesRole> {
-        Set(source.groupPath.compactMap(UlyssesRole.init(groupName:)))
+        var roles = Set<UlyssesRole>()
+        let sourceComponents = source.packageURL.pathComponents.map { $0.lowercased() }
+        if sourceComponents.contains("trash-ultrash") { roles.insert(.trash) }
+        if sourceComponents.contains("templates-ulgroup") { roles.insert(.template) }
+        if isUlyssesArchive(url: source.packageURL, groupPath: source.groupPath) {
+            roles.insert(.archive)
+        }
+        return roles
     }
+
+    private func isFavorite(_ source: SheetSource, sheet: UlyssesSheet) -> Bool {
+        sheet.isFavorite || favoriteSheetPaths.contains(source.packageURL.standardizedFileURL.path)
+    }
+}
+
+func isUlyssesArchive(url: URL, groupPath: [String]) -> Bool {
+    guard groupPath.first?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "archive",
+          let store = url.pathComponents.first(where: { $0.hasSuffix(".ulstoragebackup") })
+    else { return false }
+    return store.localizedCaseInsensitiveCompare("Ubiquitous Library.ulstoragebackup") != .orderedSame
 }
 
 struct SheetExportResult: Sendable, Equatable {
@@ -657,13 +804,208 @@ struct SheetExportResult: Sendable, Equatable {
     let orderEntry: SheetOrderEntry
 }
 
-struct PreparedSheetExport: Equatable {
+struct GroupPathResolver: Sendable, Equatable {
+    private let pathsBySourceGroup: [String: [String]]
+
+    init(sheets: [SheetSource], groups: [GroupSource]) {
+        var nodesByIdentity: [String: GroupNode] = [:]
+        var identitiesBySourceGroup: [String: [String]] = [:]
+        let records = sheets.map { ($0.groupURL, $0.groupPath) }
+            + groups.map { ($0.groupURL, $0.groupPath) }
+
+        for (groupURL, groupPath) in records {
+            var identities = Self.groupIdentities(for: groupURL)
+            if identities.count == groupPath.count + 1,
+               identities.first.map({ URL(fileURLWithPath: $0).pathExtension == "ulstoragebackup" }) == true {
+                identities.removeFirst()
+            }
+            let sourceKey = groupURL.standardizedFileURL.path
+            guard identities.count == groupPath.count else {
+                identitiesBySourceGroup[sourceKey] = []
+                continue
+            }
+            identitiesBySourceGroup[sourceKey] = identities
+            for (depth, identity) in identities.enumerated() {
+                nodesByIdentity[identity] = GroupNode(
+                    identity: identity,
+                    parentIdentity: depth == 0 ? nil : identities[depth - 1],
+                    displayName: sanitizedFileName(groupPath[depth]),
+                    depth: depth
+                )
+            }
+        }
+
+        var resolvedByIdentity: [String: [String]] = [:]
+        let maximumDepth = nodesByIdentity.values.map(\.depth).max() ?? -1
+        if maximumDepth >= 0 {
+            for depth in 0...maximumDepth {
+                let nodes = nodesByIdentity.values.filter { $0.depth == depth }
+                let byParent = Dictionary(grouping: nodes) {
+                    $0.parentIdentity.flatMap { resolvedByIdentity[$0] }?.joined(separator: "/").lowercased() ?? ""
+                }
+                for siblings in byParent.values {
+                    let byName = Dictionary(grouping: siblings) { $0.displayName.lowercased() }
+                    var used = Set(byName.values.compactMap { $0.count == 1 ? $0[0].displayName.lowercased() : nil })
+                    for sameName in byName.values.sorted(by: Self.groupOrder) {
+                        let stores = sameName.filter { URL(fileURLWithPath: $0.identity).pathExtension == "ulstoragebackup" }
+                        let canonical = stores.count == 1 ? stores[0] : nil
+                        if let canonical { used.insert(canonical.displayName.lowercased()) }
+                        for node in sameName.sorted(by: { $0.identity < $1.identity }) {
+                            let component: String
+                            if sameName.count == 1 || node == canonical {
+                                component = node.displayName
+                            } else {
+                                component = Self.disambiguatedName(for: node, used: &used)
+                            }
+                            let parent = node.parentIdentity.flatMap { resolvedByIdentity[$0] } ?? []
+                            resolvedByIdentity[node.identity] = parent + [component]
+                        }
+                    }
+                }
+            }
+        }
+
+        var paths = resolvedByIdentity
+        for (identity, path) in resolvedByIdentity where URL(fileURLWithPath: identity).pathExtension == "ulstoragebackup" {
+            paths[URL(fileURLWithPath: identity).appendingPathComponent("Content").standardizedFileURL.path] = path
+        }
+        pathsBySourceGroup = records.reduce(into: paths) { result, record in
+            let sourceKey = record.0.standardizedFileURL.path
+            let identities = identitiesBySourceGroup[sourceKey] ?? []
+            let resolved = identities.last.flatMap { resolvedByIdentity[$0] }
+                ?? record.1.map(sanitizedFileName)
+            result[sourceKey] = resolved
+        }
+    }
+
+    func outputPath(for source: SheetSource) -> [String] {
+        pathsBySourceGroup[source.groupURL.standardizedFileURL.path] ?? source.groupPath.map(sanitizedFileName)
+    }
+
+    func outputPath(for group: GroupSource) -> [String] {
+        pathsBySourceGroup[group.groupURL.standardizedFileURL.path] ?? group.groupPath.map(sanitizedFileName)
+    }
+
+    private static func groupIdentities(for groupURL: URL) -> [String] {
+        let components = groupURL.standardizedFileURL.pathComponents
+        guard let storeIndex = components.firstIndex(where: { $0.hasSuffix(".ulstoragebackup") }) else { return [] }
+        var identities: [String] = []
+        var current = URL(fileURLWithPath: "/")
+        for (index, component) in components.enumerated() {
+            if component != "/" { current.appendPathComponent(component) }
+            guard index >= storeIndex else { continue }
+            if index == storeIndex {
+                if component.localizedCaseInsensitiveCompare("Ubiquitous Library.ulstoragebackup") != .orderedSame {
+                    identities.append(current.standardizedFileURL.path)
+                }
+                continue
+            }
+            if component == "Content" || component == "Groups-ulgroup" { continue }
+            if component == "Unfiled-ulgroup" || component == "Trash-ultrash" || component.hasSuffix("-ulgroup") {
+                identities.append(current.standardizedFileURL.path)
+            }
+        }
+        return identities
+    }
+
+    private static func groupOrder(_ lhs: [GroupNode], _ rhs: [GroupNode]) -> Bool {
+        let left = lhs.first?.displayName ?? ""
+        let right = rhs.first?.displayName ?? ""
+        let comparison = left.localizedStandardCompare(right)
+        if comparison != .orderedSame { return comparison == .orderedAscending }
+        return (lhs.first?.identity ?? "") < (rhs.first?.identity ?? "")
+    }
+
+    private static func disambiguatedName(for node: GroupNode, used: inout Set<String>) -> String {
+        let rawIdentifier = URL(fileURLWithPath: node.identity).lastPathComponent
+            .replacingOccurrences(of: "-ulgroup", with: "")
+            .replacingOccurrences(of: ".ulstoragebackup", with: "")
+        var length = min(8, rawIdentifier.count)
+        var candidate = "\(node.displayName) [\(rawIdentifier.prefix(length))]"
+        while used.contains(candidate.lowercased()), length < rawIdentifier.count {
+            length = min(length + 4, rawIdentifier.count)
+            candidate = "\(node.displayName) [\(rawIdentifier.prefix(length))]"
+        }
+        var counter = 1
+        let base = candidate
+        while used.contains(candidate.lowercased()) {
+            candidate = "\(base) (\(counter))"
+            counter += 1
+        }
+        used.insert(candidate.lowercased())
+        return candidate
+    }
+}
+
+private struct GroupNode: Sendable, Equatable {
+    let identity: String
+    let parentIdentity: String?
+    let displayName: String
+    let depth: Int
+}
+
+struct OutputNameResolver: Sendable, Equatable {
+    private let namesBySourcePath: [String: String]
+
+    init(prepared: [PreparedSheetSource], groupPaths: GroupPathResolver) {
+        let byFolder = Dictionary(grouping: prepared) {
+            groupPaths.outputPath(for: $0.source).map(sanitizedFileName).joined(separator: "/").lowercased()
+        }
+        var resolved: [String: String] = [:]
+
+        for items in byFolder.values {
+            let byRequestedName = Dictionary(grouping: items) { $0.prepared.bundleName.lowercased() }
+            var used = Set<String>()
+            var duplicates: [PreparedSheetSource] = []
+
+            for group in byRequestedName.values {
+                let sorted = group.sorted { $0.source.packageURL.path < $1.source.packageURL.path }
+                guard let primary = sorted.first else { continue }
+                resolved[primary.source.packageURL.standardizedFileURL.path] = primary.prepared.bundleName
+                used.insert(primary.prepared.bundleName.lowercased())
+                duplicates.append(contentsOf: sorted.dropFirst())
+            }
+
+            for item in duplicates.sorted(by: Self.allocationOrder) {
+                let base = item.prepared.bundleName
+                var counter = 1
+                var candidate = "\(base) (\(counter))"
+                while used.contains(candidate.lowercased()) {
+                    counter += 1
+                    candidate = "\(base) (\(counter))"
+                }
+                resolved[item.source.packageURL.standardizedFileURL.path] = candidate
+                used.insert(candidate.lowercased())
+            }
+        }
+        namesBySourcePath = resolved
+    }
+
+    func name(for source: SheetSource) -> String {
+        namesBySourcePath[source.packageURL.standardizedFileURL.path]
+            ?? sanitizedFileName(source.packageURL.deletingPathExtension().lastPathComponent)
+    }
+
+    private static func allocationOrder(_ lhs: PreparedSheetSource, _ rhs: PreparedSheetSource) -> Bool {
+        let comparison = lhs.prepared.bundleName.localizedStandardCompare(rhs.prepared.bundleName)
+        if comparison != .orderedSame { return comparison == .orderedAscending }
+        return lhs.source.packageURL.path < rhs.source.packageURL.path
+    }
+}
+
+struct PreparedSheetSource: Sendable, Equatable {
+    let source: SheetSource
+    let prepared: PreparedSheetExport
+}
+
+struct PreparedSheetExport: Sendable, Equatable {
     let sheet: UlyssesSheet
     let rendered: RenderedSheet
     let bundleName: String
     let dates: SheetDates
     let roles: Set<UlyssesRole>
     let isGlued: Bool
+    let isFavorite: Bool
 
     var noteTitle: String {
         rendered.title.isEmpty ? bundleName : rendered.title
@@ -675,31 +1017,19 @@ enum UlyssesRole: String, Sendable, Comparable {
     case template
     case trash
 
-    init?(groupName: String) {
-        let normalized = groupName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        switch normalized {
-        case "archive":
-            self = .archive
-        case "template", "templates":
-            self = .template
-        case "trash":
-            self = .trash
-        default:
-            return nil
-        }
-    }
-
     static func < (lhs: UlyssesRole, rhs: UlyssesRole) -> Bool {
         lhs.rawValue < rhs.rawValue
     }
 }
 
 struct SheetOrderEntry: Sendable, Equatable {
+    let sourcePackageURL: URL
     let sourcePackageName: String
     let sourceGroupURL: URL
     let groupPath: [String]
     let title: String
     let destinationName: String
+    let favorite: Bool
     let dates: SheetDates
 }
 
@@ -776,142 +1106,6 @@ struct SheetOrderIndex: Sendable, Equatable {
     }
 }
 
-struct SheetOrderNoteWriter {
-    let sheetOrderIndex: SheetOrderIndex
-    let outputURL: URL
-
-    func writeOrderNotes(for entries: [SheetOrderEntry]) throws -> Int {
-        try orderNotePlans(for: entries).reduce(0) { written, plan in
-            _ = try TextBundleWriter().writeBundle(
-                named: plan.title,
-                markdown: plan.markdown,
-                in: plan.destinationDirectory,
-                dates: plan.dates
-            )
-            return written + 1
-        }
-    }
-
-    func countOrderNotes(for entries: [SheetOrderEntry]) -> Int {
-        orderNotePlans(for: entries).count
-    }
-
-    private func orderNotePlans(for entries: [SheetOrderEntry]) -> [OrderNotePlan] {
-        let entriesByGroup = Dictionary(grouping: entries, by: { $0.sourceGroupURL.standardizedFileURL.path })
-        var plans: [OrderNotePlan] = []
-
-        for groupEntries in entriesByGroup.values {
-            guard let first = groupEntries.first,
-                  !first.groupPath.isEmpty,
-                  let groupOrder = sheetOrderIndex.order(for: first.sourceGroupURL)
-            else {
-                continue
-            }
-
-            let orderedClusters = orderedEntries(from: groupEntries, groupOrder: groupOrder)
-            let hasGluedCluster = orderedClusters.contains { $0.count > 1 }
-            let orderedSheetCount = orderedClusters.flatMap { $0 }.count
-            guard orderedSheetCount > 1 || hasGluedCluster else { continue }
-
-            var destinationDirectory = outputURL
-            for group in first.groupPath {
-                destinationDirectory.appendPathComponent(sanitizedFileName(group))
-            }
-
-            let dates = datesForOrderNote(entries: groupEntries)
-            plans.append(OrderNotePlan(
-                destinationDirectory: destinationDirectory,
-                title: orderNoteTitle(for: first.groupPath),
-                markdown: markdown(for: orderedClusters, groupPath: first.groupPath, hasGluedCluster: hasGluedCluster),
-                dates: dates
-            ))
-        }
-
-        return plans
-    }
-
-    private func orderedEntries(from entries: [SheetOrderEntry], groupOrder: GroupSheetOrder) -> [[SheetOrderEntry]] {
-        let entriesBySourceName = Dictionary(uniqueKeysWithValues: entries.map { ($0.sourcePackageName, $0) })
-        var orderedClusters: [[SheetOrderEntry]] = []
-        var included = Set<String>()
-
-        for cluster in groupOrder.sheetClusters {
-            let resolved = cluster.compactMap { sheetName -> SheetOrderEntry? in
-                guard let entry = entriesBySourceName[sheetName] else { return nil }
-                included.insert(sheetName)
-                return entry
-            }
-            if !resolved.isEmpty {
-                orderedClusters.append(resolved)
-            }
-        }
-
-        let remaining = entries
-            .filter { !included.contains($0.sourcePackageName) }
-            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
-        orderedClusters.append(contentsOf: remaining.map { [$0] })
-
-        return orderedClusters
-    }
-
-    private func markdown(for clusters: [[SheetOrderEntry]], groupPath: [String], hasGluedCluster: Bool) -> String {
-        var lines = [
-            "# \(orderNoteTitle(for: groupPath))",
-            "",
-            hasGluedCluster ? "#ulysses/order-index #ulysses/glued" : "#ulysses/order-index",
-            "",
-            "Folder: \(groupPath.joined(separator: " / "))",
-            "",
-            "## Sheets"
-        ]
-
-        for (index, cluster) in clusters.enumerated() {
-            if cluster.count == 1, let entry = cluster.first {
-                lines.append("\(index + 1). \(link(for: entry))")
-                continue
-            }
-
-            lines.append("\(index + 1). Glued sheets")
-            for entry in cluster {
-                lines.append("   - \(link(for: entry))")
-            }
-        }
-
-        lines.append("")
-        return lines.joined(separator: "\n")
-    }
-
-    private func link(for entry: SheetOrderEntry) -> String {
-        let wikiTitle = entry.title
-            .replacingOccurrences(of: "[[", with: "[")
-            .replacingOccurrences(of: "]]", with: "]")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return "[[\(wikiTitle)]] (`\(entry.destinationName)`)"
-    }
-
-    private func orderNoteTitle(for groupPath: [String]) -> String {
-        "Ulysses Sheet Order: \(groupPath.joined(separator: " / "))"
-    }
-
-    private func datesForOrderNote(entries: [SheetOrderEntry]) -> SheetDates {
-        let created = entries.map(\.dates.created).min() ?? Date()
-        let modified = entries.map(\.dates.modified).max() ?? Date()
-        return SheetDates(created: created, modified: modified)
-    }
-}
-
-struct OrderNotePlan: Equatable {
-    let destinationDirectory: URL
-    let title: String
-    let markdown: String
-    let dates: SheetDates
-}
-
-struct TextBundleWriteResult: Equatable {
-    let bundleURL: URL
-    let usedDuplicateName: Bool
-}
-
 struct TextBundleWriter {
     func writeBundle(
         named name: String,
@@ -919,12 +1113,18 @@ struct TextBundleWriter {
         media: [ReferencedMedia] = [],
         in destinationDirectory: URL,
         dates: SheetDates
-    ) throws -> TextBundleWriteResult {
+    ) throws -> URL {
         try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
-        let requestedURL = destinationDirectory
+        let bundleURL = destinationDirectory
             .appendingPathComponent(sanitizedFileName(name))
             .appendingPathExtension("textbundle")
-        let bundleURL = try DestinationAllocator.shared.createBundle(at: requestedURL)
+        guard !FileManager.default.fileExists(atPath: bundleURL.path) else {
+            throw ExportError.destinationCollision(bundleURL.path)
+        }
+        try FileManager.default.createDirectory(
+            at: bundleURL.appendingPathComponent("assets"),
+            withIntermediateDirectories: true
+        )
         let textURL = bundleURL.appendingPathComponent("text.markdown")
         let infoURL = bundleURL.appendingPathComponent("info.json")
         let assetsURL = bundleURL.appendingPathComponent("assets")
@@ -938,10 +1138,7 @@ struct TextBundleWriter {
         }
 
         try apply(dates: dates, to: [bundleURL, assetsURL, textURL, infoURL])
-        return TextBundleWriteResult(
-            bundleURL: bundleURL,
-            usedDuplicateName: bundleURL.lastPathComponent != requestedURL.lastPathComponent
-        )
+        return bundleURL
     }
 
     private func apply(dates: SheetDates, to urls: [URL]) throws {
@@ -969,122 +1166,6 @@ struct TextBundleWriter {
     }
 }
 
-struct GroupMetadataNoteWriter {
-    let outputURL: URL
-
-    func writeMetadataNotes(for groups: [GroupSource]) throws -> Int {
-        try metadataNotePlans(for: groups).reduce(0) { written, plan in
-            _ = try TextBundleWriter().writeBundle(
-                named: plan.title,
-                markdown: plan.markdown,
-                in: plan.destinationDirectory,
-                dates: plan.dates
-            )
-            return written + 1
-        }
-    }
-
-    func countMetadataNotes(for groups: [GroupSource]) -> Int {
-        metadataNotePlans(for: groups).count
-    }
-
-    private func metadataNotePlans(for groups: [GroupSource]) -> [MetadataNotePlan] {
-        groups.compactMap { group in
-            let roles = Set(group.groupPath.suffix(1).compactMap(UlyssesRole.init(groupName:)))
-            guard group.metadata.hasUserVisibleMetadata || !roles.isEmpty else { return nil }
-            var destinationDirectory = outputURL
-            for component in group.groupPath {
-                destinationDirectory.appendPathComponent(sanitizedFileName(component))
-            }
-            let dates = groupDates(for: group)
-            let title = metadataTitle(for: group)
-            return MetadataNotePlan(
-                destinationDirectory: destinationDirectory,
-                title: title,
-                markdown: markdown(for: group, roles: roles),
-                dates: dates
-            )
-        }
-    }
-
-    private func markdown(for group: GroupSource, roles: Set<UlyssesRole>) -> String {
-        var lines = [
-            "# \(metadataTitle(for: group))",
-            "",
-            metadataTags(for: roles).joined(separator: " "),
-            "",
-            "## Group",
-            "",
-            "- Display name: \(group.metadata.displayName ?? group.groupPath.last ?? "Untitled")",
-            "- FSNotes folder: \(group.groupPath.joined(separator: " / "))"
-        ]
-
-        if let icon = group.metadata.userIconName {
-            lines.append("- Ulysses icon: \(icon)")
-        }
-        if let tint = group.metadata.userTintColor {
-            lines.append("- Ulysses color: \(tint)")
-        }
-        if !roles.isEmpty {
-            lines.append("- Ulysses role: \(roles.sorted().map(\.rawValue).joined(separator: ", "))")
-        }
-        if !group.metadata.countingGoal.isEmpty {
-            lines.append("")
-            lines.append("## Goal")
-            for (key, value) in group.metadata.countingGoal.sorted(by: { $0.key < $1.key }) {
-                lines.append("- \(key): \(value)")
-            }
-        }
-        if group.metadata.activitySessionCount > 0 {
-            lines.append("")
-            lines.append("## Activity")
-            lines.append("- Activity sessions recorded by Ulysses: \(group.metadata.activitySessionCount)")
-        }
-        if !group.metadata.childOrder.isEmpty || !group.metadata.sheetClusters.isEmpty {
-            lines.append("")
-            lines.append("## Original Order")
-            if !group.metadata.childOrder.isEmpty {
-                lines.append("- Child order entries: \(group.metadata.childOrder.count)")
-            }
-            if !group.metadata.sheetClusters.isEmpty {
-                lines.append("- Sheet clusters: \(group.metadata.sheetClusters.count)")
-                let glued = group.metadata.sheetClusters.filter { $0.count > 1 }.count
-                if glued > 0 {
-                    lines.append("- Glued clusters: \(glued)")
-                }
-            }
-        }
-        lines.append("")
-        return lines.joined(separator: "\n")
-    }
-
-    private func metadataTitle(for group: GroupSource) -> String {
-        "Ulysses Metadata: \(group.groupPath.joined(separator: " / "))"
-    }
-
-    private func metadataTags(for roles: Set<UlyssesRole>) -> [String] {
-        var tags = ["#ulysses/group-metadata"]
-        tags.append(contentsOf: roles.sorted().map { "#ulysses/\($0.rawValue)" })
-        return tags
-    }
-
-    private func groupDates(for group: GroupSource) -> SheetDates {
-        let infoValues = try? group.infoURL.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
-        let groupValues = try? group.groupURL.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey])
-        let created = groupValues?.creationDate ?? infoValues?.creationDate ?? Date()
-        let modified = infoValues?.contentModificationDate
-            ?? groupValues?.contentModificationDate
-            ?? created
-        return SheetDates(created: created, modified: modified)
-    }
-}
-
-struct MetadataNotePlan: Equatable {
-    let destinationDirectory: URL
-    let title: String
-    let markdown: String
-    let dates: SheetDates
-}
 
 struct ExportReportWriter {
     let outputURL: URL
@@ -1094,7 +1175,7 @@ struct ExportReportWriter {
         _ = try TextBundleWriter().writeBundle(
             named: "Ulysses Export Report",
             markdown: reportMarkdown(summary: summary, snapshot: snapshot, commandLine: commandLine),
-            in: outputURL,
+            in: outputURL.appendingPathComponent("_Ulysses Migration", isDirectory: true),
             dates: dates
         )
         let supportDirectory = outputURL.appendingPathComponent(".export-ulysses", isDirectory: true)
@@ -1122,6 +1203,7 @@ struct ExportReportWriter {
             "- Template sheets: \(summary.templateSheets)",
             "- Trash sheets: \(summary.trashSheets)",
             "- Favorite sheets: \(summary.favoriteSheets)",
+            "- Saved filters: \(summary.savedFilters)",
             "- Sheet order notes: \(summary.orderNotes)",
             "- Group metadata notes: \(summary.metadataNotes)",
             "- Duplicate note titles renamed: \(summary.duplicateTitles)",
@@ -1133,18 +1215,20 @@ struct ExportReportWriter {
             "",
             "- Sheet body text and Markdown-compatible formatting",
             "- Inline images and file attachments when the source asset was present",
-            "- Ulysses sidebar notes, comments, annotations, keywords, material status, glued sheet status, archive/template/trash role, and group metadata as visible Markdown",
+            "- Ulysses sidebar notes, comments, annotations, keywords, favorites, saved filters, material status, glued sheet status, archive/template/trash role, and group metadata as visible Markdown",
             "- TextBundle `info.json` dates for FSNotes",
             "",
             "## What FSNotes Cannot Model Directly",
             "",
             "- Ulysses inspector/sidebar UI placement",
             "- Ulysses group icons, colors, goals, and activity tracking as native FSNotes folder settings",
-            "- Ulysses favorites as native FSNotes pins",
+            "- Ulysses favorites as native FSNotes pins; favorites are tagged and listed in the migration companion instead",
             "",
             "## Support File",
             "",
-            "A privacy-safe JSON support report was written to `.export-ulysses/ulysses-export-report.json`. FSNotes should not show that hidden folder in the note list."
+            "A privacy-safe JSON support report and a complete migration manifest were written to `.export-ulysses/`. FSNotes should not show that hidden folder in the note list.",
+            "",
+            "All migration-only notes are grouped under `_Ulysses Migration`. In FSNotes, you can disable Show notes in Notes and Todo lists for that one folder after reviewing the migration."
         ]
 
         if !summary.missingMediaDetails.isEmpty {
@@ -1237,21 +1321,7 @@ struct SupportReport: Codable, Equatable {
     let notes: [String]
 }
 
-final class DestinationAllocator: @unchecked Sendable {
-    static let shared = DestinationAllocator()
-    private let lock = NSLock()
-
-    func createBundle(at requestedURL: URL) throws -> URL {
-        lock.lock()
-        defer { lock.unlock() }
-
-        let bundleURL = availableDestination(for: requestedURL)
-        try FileManager.default.createDirectory(at: bundleURL.appendingPathComponent("assets"), withIntermediateDirectories: true)
-        return bundleURL
-    }
-}
-
-struct UlyssesSheet: Equatable {
+struct UlyssesSheet: Sendable, Equatable {
     var body: [XMLNode] = []
     var sidebarNotes: [[XMLNode]] = []
     var fileAttachmentIDs: [String] = []
@@ -1272,7 +1342,7 @@ struct UlyssesSheet: Equatable {
     }
 }
 
-enum XMLNode: Equatable {
+indirect enum XMLNode: Sendable, Equatable {
     case text(String)
     case element(name: String, attributes: [String: String], children: [XMLNode])
 
@@ -1370,14 +1440,14 @@ final class UlyssesSheetParser: NSObject, XMLParserDelegate {
     }
 }
 
-struct RenderedSheet: Equatable {
+struct RenderedSheet: Sendable, Equatable {
     var title: String
     var markdown: String
     var media: [ReferencedMedia]
     var summary: ExportSummary
 }
 
-struct ReferencedMedia: Equatable {
+struct ReferencedMedia: Sendable, Equatable {
     var sourceURL: URL?
     var destinationName: String
     var recoveredFromGlobalIndex = false
@@ -1409,6 +1479,10 @@ struct MarkdownRenderer {
 
         if !sheet.migrationTags.isEmpty {
             sections.append("## Ulysses Migration Tags\n\n" + sheet.migrationTags.map { "#\(tagSlug($0))" }.joined(separator: " "))
+        }
+
+        if !context.footnotes.isEmpty {
+            sections.append(context.footnotes.joined(separator: "\n\n"))
         }
 
         if !sheet.unsupportedAttachmentTypes.isEmpty {
@@ -1471,6 +1545,21 @@ struct MarkdownRenderer {
             return table
         }
 
+        if let kind = paragraphKind(in: children) {
+            let inlineNodes = children.first?.elementName == "tags" ? Array(children.dropFirst()) : children
+            let content = inlineNodes.map { renderInline($0, context: &context) }.joined()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            switch kind {
+            case "codeblock", "nativeblock":
+                let fence = content.contains("```") ? "````" : "```"
+                return "\(fence)\n\(content)\n\(fence)"
+            case "comment":
+                return "> **Ulysses comment:** \(content)"
+            default:
+                break
+            }
+        }
+
         let (prefix, inlineNodes) = paragraphPrefix(children)
         let content = inlineNodes.map { renderInline($0, context: &context) }.joined()
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1480,6 +1569,17 @@ struct MarkdownRenderer {
         }
 
         return prefix + content
+    }
+
+    private func paragraphKind(in children: [XMLNode]) -> String? {
+        guard let first = children.first,
+              case .element("tags", _, let tagNodes) = first else { return nil }
+        for tag in tagNodes {
+            if case .element("tag", let attributes, _) = tag, let kind = attributes["kind"] {
+                return kind
+            }
+        }
+        return nil
     }
 
     private func renderTableIfPresent(in children: [XMLNode], context: inout RenderContext) -> String? {
@@ -1611,11 +1711,12 @@ struct MarkdownRenderer {
             if annotation.isEmpty {
                 return body
             }
-            return "\(body) <!-- Ulysses annotation: \(annotation) -->"
+            return "\(body) **[Ulysses annotation: \(annotation)]**"
         case "code":
             return "`\(elementBody(children, context: &context))`"
         case "inlineComment", "comment":
-            return "<!-- \(elementBody(children, context: &context).trimmingCharacters(in: .whitespacesAndNewlines)) -->"
+            let comment = elementBody(children, context: &context).trimmingCharacters(in: .whitespacesAndNewlines)
+            return "**[Ulysses comment: \(comment)]**"
         case "link":
             let title = attributeValue("title", in: children)
             let url = attributeValue("URL", in: children)
@@ -1650,7 +1751,9 @@ struct MarkdownRenderer {
             }
             return "![\(description)]()"
         case "footnote":
-            return "[^\(elementBody(children, context: &context))]"
+            let text = attributeMarkdown("text", in: children, context: &context)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return context.recordFootnote(text.isEmpty ? "Ulysses footnote with no text" : text)
         case "video":
             if let url = attributeValue("URL", in: children), !url.isEmpty {
                 return "[Video](\(url))"
@@ -1685,15 +1788,29 @@ struct MarkdownRenderer {
         return nil
     }
 
+    private func attributeMarkdown(_ identifier: String, in children: [XMLNode], context: inout RenderContext) -> String {
+        for child in children {
+            guard case .element("attribute", let attributes, let attributeChildren) = child,
+                  attributes["identifier"] == identifier else { continue }
+            return attributeChildren.map { node in
+                if case .element("string", _, let stringChildren) = node {
+                    return renderBlockNodes(stringChildren, context: &context)
+                }
+                return renderInline(node, context: &context)
+            }.joined()
+        }
+        return ""
+    }
+
     private func title(from markdown: String) -> String {
         for line in markdown.split(separator: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.hasPrefix("#") {
-                return trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "# ")).trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-            if !trimmed.isEmpty {
-                return trimmed
-            }
+            var title = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            title = title.replacingOccurrences(of: "!\\[([^]]*)\\]\\([^)]+\\)", with: "$1", options: .regularExpression)
+            title = title.replacingOccurrences(of: "\\[([^]]+)\\]\\([^)]+\\)", with: "$1", options: .regularExpression)
+            title = title.replacingOccurrences(of: "^#{1,6}\\s+", with: "", options: .regularExpression)
+            title = title.replacingOccurrences(of: "[*_~=`]", with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !title.isEmpty { return title }
         }
         return ""
     }
@@ -1704,6 +1821,18 @@ struct RenderContext {
     var media: [ReferencedMedia] = []
     var mediaByDestination: Set<String> = []
     var summary = ExportSummary()
+    var footnotes: [String] = []
+
+    mutating func recordFootnote(_ text: String) -> String {
+        let identifier = "ulysses-\(footnotes.count + 1)"
+        let definition = text
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .enumerated()
+            .map { $0.offset == 0 ? "[^\(identifier)]: \($0.element)" : "    \($0.element)" }
+            .joined(separator: "\n")
+        footnotes.append(definition)
+        return "[^\(identifier)]"
+    }
 
     mutating func resolveMedia(id: String) -> ReferencedMedia? {
         guard let source = mediaResolver.mediaFile(matching: id) else { return nil }
@@ -1835,7 +1964,7 @@ private func assetMarkdownPath(for destinationName: String) -> String {
 }
 
 private func markdownPath(for fileName: String) -> String {
-    let allowed = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "#%?[]"))
+    let allowed = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "#%?[]()"))
     return fileName.addingPercentEncoding(withAllowedCharacters: allowed) ?? fileName
 }
 
@@ -1846,22 +1975,4 @@ private func isImageFile(_ fileName: String) -> Bool {
     default:
         return false
     }
-}
-
-private func availableDestination(for destination: URL) -> URL {
-    var availableDestination = destination
-    let baseName = destination.deletingPathExtension().lastPathComponent
-    let pathExtension = destination.pathExtension
-    var version = 0
-    while FileManager.default.fileExists(atPath: availableDestination.path) {
-        version += 1
-        var nextDestination = destination
-            .deletingLastPathComponent()
-            .appendingPathComponent("\(baseName) (\(version))")
-        if !pathExtension.isEmpty {
-            nextDestination.appendPathExtension(pathExtension)
-        }
-        availableDestination = nextDestination
-    }
-    return availableDestination
 }

@@ -12,7 +12,7 @@ struct ExportUlysses: AsyncParsableCommand {
     @Argument(help: "The path to a Ulysses .ulbackup folder, for example Ulysses/Backups/Latest Backup.ulbackup.")
     var input: String
 
-    @Argument(help: "The folder where FSNotes TextBundles should be written. Required unless --analyze is used without --doctor.")
+    @Argument(help: "The folder where FSNotes TextBundles should be written. Required for export; optional with --analyze or --doctor.")
     var output: String?
 
     @Flag(help: "Create directories for each Ulysses Group, and export notes into them.")
@@ -48,9 +48,10 @@ struct ExportUlysses: AsyncParsableCommand {
             if result.hasFailures {
                 throw ExitCode.failure
             }
-            if !analyze {
-                return
+            if analyze, let analysis = result.analysis {
+                printAnalysis(analysis)
             }
+            return
         }
 
         if analyze {
@@ -61,10 +62,7 @@ struct ExportUlysses: AsyncParsableCommand {
                 ignoring: ignore,
                 commandLine: CommandLine.arguments
             )
-            printSummary(analysis.summary)
-            print("")
-            print("Privacy-safe support report JSON:")
-            print(analysis.supportJSON)
+            printAnalysis(analysis)
             return
         }
 
@@ -76,7 +74,14 @@ struct ExportUlysses: AsyncParsableCommand {
         let summary = try await exporter
             .run(input: input, output: output, keepGroups: keepGroups, ignoring: ignore, commandLine: CommandLine.arguments)
         printSummary(summary)
-        print("Wrote Ulysses Export Report.textbundle and hidden .export-ulysses/ulysses-export-report.json.")
+        print("Wrote migration notes under _Ulysses Migration and support files under hidden .export-ulysses.")
+    }
+
+    private func printAnalysis(_ analysis: ExportAnalysis) {
+        printSummary(analysis.summary)
+        print("")
+        print("Privacy-safe support report JSON:")
+        print(analysis.supportJSON)
     }
 
     private func printSummary(_ summary: ExportSummary) {
@@ -92,6 +97,7 @@ struct ExportUlysses: AsyncParsableCommand {
         Template sheets: \(summary.templateSheets)
         Trash sheets: \(summary.trashSheets)
         Favorite sheets: \(summary.favoriteSheets)
+        Saved filters: \(summary.savedFilters)
         Sheet order notes: \(summary.orderNotes)
         Group metadata notes: \(summary.metadataNotes)
         Export report notes: \(summary.reportNotes)

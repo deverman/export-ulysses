@@ -103,6 +103,26 @@ final class UlyssesExporterTests: XCTestCase {
         XCTAssertTrue(markdown.contains("#ulysses/material #ulysses/archive"))
     }
 
+    func testOrdinaryArchiveNamedGroupIsNotTaggedAsUlyssesArchive() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let group = input.appendingPathComponent("Ubiquitous Library.ulstoragebackup/Content/Groups-ulgroup/archive-ulgroup")
+        let sheet = group.appendingPathComponent("note.ulysses")
+        try FileManager.default.createDirectory(at: sheet, withIntermediateDirectories: true)
+        try writeInfo(displayName: "Archive", to: group.appendingPathComponent("Info.ulgroup"))
+        try titledSheet("Regular Group Note").write(to: sheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+
+        let output = root.appendingPathComponent("Output")
+        let summary = try await Exporter().run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+        let markdown = try String(
+            contentsOf: output.appendingPathComponent("Archive/Regular Group Note.textbundle/text.markdown"),
+            encoding: .utf8
+        )
+
+        XCTAssertEqual(summary.archiveSheets, 0)
+        XCTAssertFalse(markdown.contains("#ulysses/archive"))
+    }
+
     func testWritesUlyssesSheetOrderNotesAndTagsGluedSheets() async throws {
         let root = try temporaryDirectory()
         let input = root.appendingPathComponent("Backup.ulbackup")
@@ -135,15 +155,16 @@ final class UlyssesExporterTests: XCTestCase {
 
         let folder = output.appendingPathComponent("Project/Content/Ordered")
         let orderMarkdown = try String(
-            contentsOf: folder.appendingPathComponent("Ulysses Sheet Order- Project - Content - Ordered.textbundle/text.markdown"),
+            contentsOf: output.appendingPathComponent("_Ulysses Migration/Ulysses Library Map.textbundle/text.markdown"),
             encoding: .utf8
         )
-        XCTAssertTrue(orderMarkdown.contains("# Ulysses Sheet Order: Project / Content / Ordered"))
-        XCTAssertTrue(orderMarkdown.contains("#ulysses/order-index #ulysses/glued"))
-        XCTAssertTrue(orderMarkdown.contains("1. [[Second]] (`Second.textbundle`)"))
+        XCTAssertTrue(orderMarkdown.contains("## Ulysses Sheet Order: Project / Content / Ordered"))
+        XCTAssertTrue(orderMarkdown.contains("#ulysses/order-index"))
+        XCTAssertTrue(orderMarkdown.contains("#ulysses/glued"))
+        XCTAssertTrue(orderMarkdown.contains("1. [Second](fsnotes://find?id=Second) (`Second.textbundle`)"))
         XCTAssertTrue(orderMarkdown.contains("2. Glued sheets"))
-        XCTAssertTrue(orderMarkdown.contains("- [[First]] (`First.textbundle`)"))
-        XCTAssertTrue(orderMarkdown.contains("- [[Third]] (`Third.textbundle`)"))
+        XCTAssertTrue(orderMarkdown.contains("- [First](fsnotes://find?id=First) (`First.textbundle`)"))
+        XCTAssertTrue(orderMarkdown.contains("- [Third](fsnotes://find?id=Third) (`Third.textbundle`)"))
         XCTAssertLessThan(orderMarkdown.range(of: "[Second]")!.lowerBound, orderMarkdown.range(of: "Glued sheets")!.lowerBound)
 
         let firstMarkdown = try String(contentsOf: folder.appendingPathComponent("First.textbundle/text.markdown"), encoding: .utf8)
@@ -252,7 +273,7 @@ final class UlyssesExporterTests: XCTestCase {
         XCTAssertEqual(summary.trashSheets, 1)
         XCTAssertEqual(summary.favoriteSheets, 1)
         XCTAssertEqual(summary.reportNotes, 1)
-        XCTAssertEqual(summary.metadataNotes, 2)
+        XCTAssertEqual(summary.metadataNotes, 1)
 
         let templateMarkdown = try String(
             contentsOf: output.appendingPathComponent("Archive/Content/Templates/Reusable Draft.textbundle/text.markdown"),
@@ -269,17 +290,18 @@ final class UlyssesExporterTests: XCTestCase {
         XCTAssertTrue(trashMarkdown.contains("#ulysses/trash"))
 
         let metadataMarkdown = try String(
-            contentsOf: output.appendingPathComponent("Archive/Content/Templates/Ulysses Metadata- Archive - Content - Templates.textbundle/text.markdown"),
+            contentsOf: output.appendingPathComponent("_Ulysses Migration/Ulysses Group Metadata.textbundle/text.markdown"),
             encoding: .utf8
         )
-        XCTAssertTrue(metadataMarkdown.contains("# Ulysses Metadata: Archive / Content / Templates"))
-        XCTAssertTrue(metadataMarkdown.contains("#ulysses/group-metadata #ulysses/template"))
+        XCTAssertTrue(metadataMarkdown.contains("## Ulysses Metadata: Archive / Content / Templates"))
+        XCTAssertTrue(metadataMarkdown.contains("#ulysses/group-metadata"))
+        XCTAssertTrue(metadataMarkdown.contains("#ulysses/template"))
         XCTAssertTrue(metadataMarkdown.contains("- Ulysses icon: Material"))
         XCTAssertTrue(metadataMarkdown.contains("- Ulysses color: gray"))
-        XCTAssertTrue(metadataMarkdown.contains("## Goal"))
+        XCTAssertTrue(metadataMarkdown.contains("### Goal"))
         XCTAssertTrue(metadataMarkdown.contains("- targetResult: 100"))
 
-        let reportMarkdown = try String(contentsOf: output.appendingPathComponent("Ulysses Export Report.textbundle/text.markdown"), encoding: .utf8)
+        let reportMarkdown = try String(contentsOf: output.appendingPathComponent("_Ulysses Migration/Ulysses Export Report.textbundle/text.markdown"), encoding: .utf8)
         XCTAssertTrue(reportMarkdown.contains("- Sheets: 2"))
         XCTAssertTrue(reportMarkdown.contains("- Template sheets: 1"))
         XCTAssertTrue(reportMarkdown.contains("- Trash sheets: 1"))
@@ -289,6 +311,7 @@ final class UlyssesExporterTests: XCTestCase {
         let counts = try XCTUnwrap(report?["counts"] as? [String: Any])
         XCTAssertEqual(counts["sheets"] as? Int, 2)
         XCTAssertEqual(counts["favoriteSheets"] as? Int, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent(".export-ulysses/manifest.json").path))
 
         let infoData = try Data(contentsOf: output.appendingPathComponent("Archive/Content/Templates/Reusable Draft.textbundle/info.json"))
         let info = try JSONSerialization.jsonObject(with: infoData) as? [String: Any]
@@ -298,6 +321,240 @@ final class UlyssesExporterTests: XCTestCase {
         XCTAssertEqual(info?["creatorIdentifier"] as? String, "org.deverman.export-ulysses")
         XCTAssertNotNil(info?["created"])
         XCTAssertNotNil(info?["modified"])
+    }
+
+    func testReadsFavoritesPlistAndSavedFilters() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let content = input.appendingPathComponent("Store.ulstoragebackup/Content")
+        let inbox = content.appendingPathComponent("Unfiled-ulgroup")
+        let sheet = inbox.appendingPathComponent("favorite.ulysses")
+        let filter = content.appendingPathComponent("published-ulfilter")
+        try FileManager.default.createDirectory(at: sheet, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: filter, withIntermediateDirectories: true)
+        try titledSheet("Favorite Sheet").write(to: sheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+
+        let favoritesData = try PropertyListSerialization.data(
+            fromPropertyList: ["order": ["Unfiled-ulgroup/favorite.ulysses"]],
+            format: .binary,
+            options: 0
+        )
+        try favoritesData.write(to: content.appendingPathComponent("favorites"))
+        let filterData = try PropertyListSerialization.data(
+            fromPropertyList: [
+                "displayName": "Published Articles",
+                "query": ["conditions": [["conditionType": "KeywordSearch", "keywords": ["published"]]]]
+            ],
+            format: .xml,
+            options: 0
+        )
+        try filterData.write(to: filter.appendingPathComponent("Info.ulfilter"))
+
+        let output = root.appendingPathComponent("Output")
+        let summary = try await Exporter().run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+
+        XCTAssertEqual(summary.favoriteSheets, 1)
+        XCTAssertEqual(summary.savedFilters, 1)
+        let sheetMarkdown = try String(contentsOf: output.appendingPathComponent("Inbox/Favorite Sheet.textbundle/text.markdown"), encoding: .utf8)
+        XCTAssertTrue(sheetMarkdown.contains("#ulysses/favorite"))
+        let favorites = try String(contentsOf: output.appendingPathComponent("_Ulysses Migration/Ulysses Favorites.textbundle/text.markdown"), encoding: .utf8)
+        XCTAssertTrue(favorites.contains("[Favorite Sheet](fsnotes://find?id=Favorite%20Sheet)"))
+        let filters = try String(contentsOf: output.appendingPathComponent("_Ulysses Migration/Ulysses Saved Filters.textbundle/text.markdown"), encoding: .utf8)
+        XCTAssertTrue(filters.contains("## Published Articles"))
+        XCTAssertTrue(filters.contains("KeywordSearch"))
+    }
+
+    func testRendersFootnotesCommentsAnnotationsAndCodeBlocks() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let sheet = input.appendingPathComponent("Store.ulstoragebackup/Content/Unfiled-ulgroup/markup.ulysses")
+        try FileManager.default.createDirectory(at: sheet, withIntermediateDirectories: true)
+        try contentXML("""
+        <sheet>
+        <string xml:space="preserve">
+        <p><tags><tag kind="heading1"># </tag></tags>Markup</p>
+        <p>Body<element kind="footnote"><attribute identifier="text"><string xml:space="preserve"><p>Footnote text.</p></string></attribute></element></p>
+        <p>Review <element kind="inlineComment">this claim</element>.</p>
+        <p><element kind="annotation"><attribute identifier="text"><string xml:space="preserve"><p>Check source</p></string></attribute>annotated words</element></p>
+        <p><tags><tag kind="comment">%% </tag></tags>Block comment</p>
+        <p><tags><tag kind="codeblock">''</tag></tags>let value = 1</p>
+        </string>
+        </sheet>
+        """).write(to: sheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+
+        let output = root.appendingPathComponent("Output")
+        _ = try await Exporter().run(input: input.path, output: output.path, keepGroups: false, ignoring: [])
+        let markdown = try String(contentsOf: output.appendingPathComponent("Markup.textbundle/text.markdown"), encoding: .utf8)
+
+        XCTAssertTrue(markdown.contains("Body[^ulysses-1]"))
+        XCTAssertTrue(markdown.contains("[^ulysses-1]: Footnote text."))
+        XCTAssertTrue(markdown.contains("**[Ulysses comment: this claim]**"))
+        XCTAssertTrue(markdown.contains("annotated words **[Ulysses annotation: Check source]**"))
+        XCTAssertTrue(markdown.contains("> **Ulysses comment:** Block comment"))
+        XCTAssertTrue(markdown.contains("```\nlet value = 1\n```"))
+    }
+
+    func testIgnoreSkipsMatchingGroupInsteadOfFlatteningIt() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let groups = input.appendingPathComponent("Store.ulstoragebackup/Content/Groups-ulgroup")
+        let ignored = groups.appendingPathComponent("ignored-ulgroup")
+        let kept = groups.appendingPathComponent("kept-ulgroup")
+        try FileManager.default.createDirectory(at: ignored.appendingPathComponent("ignored.ulysses"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: kept.appendingPathComponent("kept.ulysses"), withIntermediateDirectories: true)
+        try writeInfo(displayName: "Ignored", to: ignored.appendingPathComponent("Info.ulgroup"))
+        try writeInfo(displayName: "Kept", to: kept.appendingPathComponent("Info.ulgroup"))
+        try titledSheet("Ignored Note").write(to: ignored.appendingPathComponent("ignored.ulysses/Content.xml"), atomically: true, encoding: .utf8)
+        try titledSheet("Kept Note").write(to: kept.appendingPathComponent("kept.ulysses/Content.xml"), atomically: true, encoding: .utf8)
+
+        let output = root.appendingPathComponent("Output")
+        let summary = try await Exporter().run(input: input.path, output: output.path, keepGroups: true, ignoring: [" ignored "])
+
+        XCTAssertEqual(summary.sheets, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("Kept/Kept Note.textbundle").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: output.appendingPathComponent("Ignored").path))
+    }
+
+    func testRefusesToAppendASecondMigrationToNonEmptyOutput() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let sheet = input.appendingPathComponent("Store.ulstoragebackup/Content/Unfiled-ulgroup/note.ulysses")
+        try FileManager.default.createDirectory(at: sheet, withIntermediateDirectories: true)
+        try titledSheet("One Note").write(to: sheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+        let output = root.appendingPathComponent("Output")
+        _ = try await Exporter().run(input: input.path, output: output.path, keepGroups: false, ignoring: [])
+
+        do {
+            _ = try await Exporter().run(input: input.path, output: output.path, keepGroups: false, ignoring: [])
+            XCTFail("Expected a non-empty output error")
+        } catch let error as ExportError {
+            guard case .outputNotEmpty = error else { return XCTFail("Unexpected error: \(error)") }
+        }
+    }
+
+    func testDuplicateTitlesUseDistinctFSNotesTargets() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let group = input.appendingPathComponent("Store.ulstoragebackup/Content/Groups-ulgroup/duplicates-ulgroup")
+        let first = group.appendingPathComponent("first.ulysses")
+        let second = group.appendingPathComponent("second.ulysses")
+        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
+        try writeInfo(displayName: "Duplicates", sheetClusters: [["first.ulysses"], ["second.ulysses"]], to: group.appendingPathComponent("Info.ulgroup"))
+        try titledSheet("Same Title").write(to: first.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+        try titledSheet("Same Title").write(to: second.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+
+        let output = root.appendingPathComponent("Output")
+        _ = try await Exporter(maxConcurrentExports: 2).run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+        let map = try String(contentsOf: output.appendingPathComponent("_Ulysses Migration/Ulysses Library Map.textbundle/text.markdown"), encoding: .utf8)
+
+        XCTAssertTrue(map.contains("fsnotes://find?id=Same%20Title)"))
+        XCTAssertTrue(map.contains("fsnotes://find?id=Same%20Title%20%281%29)"))
+    }
+
+    func testDuplicateAllocationPreservesNaturalSuffixedTitleAndMatchesAnalysis() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let group = input.appendingPathComponent("Store.ulstoragebackup/Content/Groups-ulgroup/duplicates-ulgroup")
+        let sheets = ["first.ulysses", "second.ulysses", "natural.ulysses"]
+        for name in sheets {
+            try FileManager.default.createDirectory(at: group.appendingPathComponent(name), withIntermediateDirectories: true)
+        }
+        try writeInfo(
+            displayName: "Duplicates",
+            sheetClusters: sheets.map { [$0] },
+            to: group.appendingPathComponent("Info.ulgroup")
+        )
+        try titledSheet("Same Title").write(to: group.appendingPathComponent("first.ulysses/Content.xml"), atomically: true, encoding: .utf8)
+        try titledSheet("Same Title").write(to: group.appendingPathComponent("second.ulysses/Content.xml"), atomically: true, encoding: .utf8)
+        try titledSheet("Same Title (1)").write(to: group.appendingPathComponent("natural.ulysses/Content.xml"), atomically: true, encoding: .utf8)
+
+        let analysis = try await Exporter(maxConcurrentExports: 3).analyze(
+            input: input.path,
+            keepGroups: true,
+            ignoring: []
+        )
+        let output = root.appendingPathComponent("Output")
+        let summary = try await Exporter(maxConcurrentExports: 3).run(
+            input: input.path,
+            output: output.path,
+            keepGroups: true,
+            ignoring: []
+        )
+
+        XCTAssertEqual(analysis.summary.duplicateTitles, 1)
+        XCTAssertEqual(summary.duplicateTitles, analysis.summary.duplicateTitles)
+        let folder = output.appendingPathComponent("Duplicates")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("Same Title.textbundle").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("Same Title (1).textbundle").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("Same Title (2).textbundle").path))
+    }
+
+    func testCollidingGroupNamesRemainSeparate() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let groups = input.appendingPathComponent("Store.ulstoragebackup/Content/Groups-ulgroup")
+        let firstGroup = groups.appendingPathComponent("one-ulgroup")
+        let secondGroup = groups.appendingPathComponent("two-ulgroup")
+        try FileManager.default.createDirectory(at: firstGroup.appendingPathComponent("first.ulysses"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondGroup.appendingPathComponent("second.ulysses"), withIntermediateDirectories: true)
+        try writeInfo(displayName: "Same Group", to: firstGroup.appendingPathComponent("Info.ulgroup"))
+        try writeInfo(displayName: "Same Group", to: secondGroup.appendingPathComponent("Info.ulgroup"))
+        try titledSheet("First Note").write(to: firstGroup.appendingPathComponent("first.ulysses/Content.xml"), atomically: true, encoding: .utf8)
+        try titledSheet("Second Note").write(to: secondGroup.appendingPathComponent("second.ulysses/Content.xml"), atomically: true, encoding: .utf8)
+
+        let output = root.appendingPathComponent("Output")
+        _ = try await Exporter().run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("Same Group [one]/First Note.textbundle").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("Same Group [two]/Second Note.textbundle").path))
+    }
+
+    func testCollidingParentGroupsDoNotMergeDistinctChildren() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let groups = input.appendingPathComponent("Store.ulstoragebackup/Content/Groups-ulgroup")
+        let firstParent = groups.appendingPathComponent("one-ulgroup")
+        let secondParent = groups.appendingPathComponent("two-ulgroup")
+        let firstChild = firstParent.appendingPathComponent("alpha-ulgroup")
+        let secondChild = secondParent.appendingPathComponent("beta-ulgroup")
+        try FileManager.default.createDirectory(at: firstChild.appendingPathComponent("first.ulysses"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondChild.appendingPathComponent("second.ulysses"), withIntermediateDirectories: true)
+        try writeInfo(displayName: "Store", to: groups.deletingLastPathComponent().appendingPathComponent("Info.ulgroup"))
+        try writeInfo(displayName: "Same Parent", to: firstParent.appendingPathComponent("Info.ulgroup"))
+        try writeInfo(displayName: "Same Parent", to: secondParent.appendingPathComponent("Info.ulgroup"))
+        try writeInfo(displayName: "Alpha", to: firstChild.appendingPathComponent("Info.ulgroup"))
+        try writeInfo(displayName: "Beta", to: secondChild.appendingPathComponent("Info.ulgroup"))
+        try titledSheet("First Note").write(to: firstChild.appendingPathComponent("first.ulysses/Content.xml"), atomically: true, encoding: .utf8)
+        try titledSheet("Second Note").write(to: secondChild.appendingPathComponent("second.ulysses/Content.xml"), atomically: true, encoding: .utf8)
+
+        let output = root.appendingPathComponent("Output")
+        _ = try await Exporter().run(input: input.path, output: output.path, keepGroups: true, ignoring: [])
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("Store/Same Parent [one]/Alpha/First Note.textbundle").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("Store/Same Parent [two]/Beta/Second Note.textbundle").path))
+    }
+
+    func testImageFirstTitleAndParenthesizedAssetProduceValidMarkdown() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let sheet = input.appendingPathComponent("Store.ulstoragebackup/Content/Unfiled-ulgroup/image.ulysses")
+        let media = sheet.appendingPathComponent("Media")
+        try FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
+        try Data("image".utf8).write(to: media.appendingPathComponent("Cover (1).asset123.png"))
+        try contentXML("""
+        <sheet>
+        <string xml:space="preserve">
+        <p><element kind="image"><attribute identifier="image">asset123</attribute><attribute identifier="description">Cover Image</attribute></element></p>
+        </string>
+        </sheet>
+        """).write(to: sheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+
+        let output = root.appendingPathComponent("Output")
+        _ = try await Exporter().run(input: input.path, output: output.path, keepGroups: false, ignoring: [])
+
+        let markdown = try String(contentsOf: output.appendingPathComponent("Cover Image.textbundle/text.markdown"), encoding: .utf8)
+        XCTAssertTrue(markdown.contains("![Cover Image](assets/Cover%20%281%29.asset123.png)"))
     }
 
     func testAnalyzeIsDryRunAndReturnsSupportJSON() async throws {
