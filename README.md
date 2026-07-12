@@ -2,7 +2,7 @@
 
 Migrate a Ulysses 40 backup into a validated FSNotes library without dropping sheets, sidebar notes, comments, attachments, images, groups, order, or Trash state.
 
-Verified with Ulysses 40 build 83290, macOS 26 Tahoe, Swift 6.3.2, TextBundle v2, and FSNotes. New or changed Ulysses formats are rejected before any output is published.
+Verified with Ulysses 40 build 83290, macOS 26 Tahoe, Swift 6.3.2, TextBundle v2, and FSNotes. Format changes are reported during preflight: optional metadata drift produces warnings, while structural changes that could silently lose sheet content stop migration by default. Maintainers can inspect an unverified format with the CLI's `--allow-unknown-format` override.
 
 ## Migrate In 3 Steps
 
