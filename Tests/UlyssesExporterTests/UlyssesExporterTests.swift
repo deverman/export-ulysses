@@ -388,13 +388,21 @@ final class UlyssesExporterTests: XCTestCase {
         let content = input.appendingPathComponent("Ubiquitous Library.ulstoragebackup/Content")
         let inbox = content.appendingPathComponent("Unfiled-ulgroup")
         let sheet = inbox.appendingPathComponent("favorite.ulysses")
+        let trashedSheet = content.appendingPathComponent("Trash-ultrash/trashed-favorite.ulysses")
         let filter = content.appendingPathComponent("published-ulfilter")
         try FileManager.default.createDirectory(at: sheet, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: trashedSheet, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: filter, withIntermediateDirectories: true)
         try titledSheet("Favorite Sheet").write(to: sheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+        try titledSheet("Trashed Favorite").write(to: trashedSheet.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
 
         let favoritesData = try PropertyListSerialization.data(
-            fromPropertyList: ["order": ["Unfiled-ulgroup/favorite.ulysses"]],
+            fromPropertyList: [
+                "order": [
+                    "Unfiled-ulgroup/favorite.ulysses",
+                    "Trash-ultrash/trashed-favorite.ulysses"
+                ]
+            ],
             format: .binary,
             options: 0
         )
@@ -416,8 +424,11 @@ final class UlyssesExporterTests: XCTestCase {
         XCTAssertEqual(summary.savedFilters, 1)
         let sheetMarkdown = try String(contentsOf: output.appendingPathComponent("Favorite Sheet.textbundle/text.markdown"), encoding: .utf8)
         XCTAssertTrue(sheetMarkdown.contains("#ulysses/favorite"))
+        let trashedMarkdown = try String(contentsOf: output.appendingPathComponent("Trash/Trashed Favorite.textbundle/text.markdown"), encoding: .utf8)
+        XCTAssertFalse(trashedMarkdown.contains("#ulysses/favorite"))
         let favorites = try String(contentsOf: output.appendingPathComponent("_Ulysses Migration/Ulysses Favorites.textbundle/text.markdown"), encoding: .utf8)
         XCTAssertTrue(favorites.contains("[Favorite Sheet](fsnotes://find?id=Favorite%20Sheet)"))
+        XCTAssertFalse(favorites.contains("Trashed Favorite"))
         let filters = try String(contentsOf: output.appendingPathComponent("_Ulysses Migration/Ulysses Saved Filters.textbundle/text.markdown"), encoding: .utf8)
         XCTAssertTrue(filters.contains("## Published Articles"))
         XCTAssertTrue(filters.contains("KeywordSearch"))
@@ -509,6 +520,56 @@ final class UlyssesExporterTests: XCTestCase {
 
         XCTAssertTrue(map.contains("fsnotes://find?id=Same%20Title)"))
         XCTAssertTrue(map.contains("fsnotes://find?id=Same%20Title%20%281%29)"))
+    }
+
+    func testFSNotesTargetsAreUniqueAcrossFoldersIgnoringCase() async throws {
+        let root = try temporaryDirectory()
+        let input = root.appendingPathComponent("Backup.ulbackup")
+        let groups = input.appendingPathComponent("Store.ulstoragebackup/Content/Groups-ulgroup")
+        let firstGroup = groups.appendingPathComponent("first-ulgroup")
+        let secondGroup = groups.appendingPathComponent("second-ulgroup")
+        let first = firstGroup.appendingPathComponent("first.ulysses")
+        let second = secondGroup.appendingPathComponent("second.ulysses")
+        let firstSibling = firstGroup.appendingPathComponent("first-sibling.ulysses")
+        let secondSibling = secondGroup.appendingPathComponent("second-sibling.ulysses")
+        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: firstSibling, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondSibling, withIntermediateDirectories: true)
+        try writeInfo(
+            displayName: "First",
+            sheetClusters: [["first.ulysses"], ["first-sibling.ulysses"]],
+            to: firstGroup.appendingPathComponent("Info.ulgroup")
+        )
+        try writeInfo(
+            displayName: "Second",
+            sheetClusters: [["second.ulysses"], ["second-sibling.ulysses"]],
+            to: secondGroup.appendingPathComponent("Info.ulgroup")
+        )
+        let sharedName = String(repeating: "A", count: 180)
+        let caseVariant = sharedName.lowercased()
+        let suffixedName = String(caseVariant.prefix(176)) + " (1)"
+        try titledSheet(sharedName).write(to: first.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+        try titledSheet(caseVariant).write(to: second.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+        try titledSheet("First Sibling").write(to: firstSibling.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+        try titledSheet("Second Sibling").write(to: secondSibling.appendingPathComponent("Content.xml"), atomically: true, encoding: .utf8)
+
+        let output = root.appendingPathComponent("Output")
+        let summary = try await Exporter(maxConcurrentExports: 2).run(
+            input: input.path,
+            output: output.path,
+            allowUnknownFormat: true
+        )
+        let map = try String(
+            contentsOf: output.appendingPathComponent("_Ulysses Migration/Ulysses Library Map.textbundle/text.markdown"),
+            encoding: .utf8
+        )
+
+        XCTAssertEqual(summary.duplicateTitles, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("First/\(sharedName).textbundle").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: output.appendingPathComponent("Second/\(suffixedName).textbundle").path))
+        XCTAssertTrue(map.contains("fsnotes://find?id=\(sharedName)"))
+        XCTAssertTrue(map.contains("fsnotes://find?id=\(String(caseVariant.prefix(176)))%20%281%29)"))
     }
 
     func testDuplicateAllocationPreservesNaturalSuffixedTitleAndMatchesAnalysis() async throws {

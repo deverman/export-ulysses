@@ -6,37 +6,85 @@
 
 Migrate a Ulysses 40 backup into a validated FSNotes library while preserving every recoverable sheet, sidebar note, comment, attachment, image, group, order relationship, and Trash state.
 
-Verified with Ulysses 40 build 83290, macOS 26 Tahoe, Swift 6.3.2, TextBundle v2, and FSNotes. Format changes are reported during preflight: optional metadata drift produces warnings, while structural changes that could silently lose sheet content stop migration by default. Maintainers can inspect an unverified format with the CLI's `--allow-unknown-format` override.
+Verified with Ulysses 40 build 83290, macOS 26 Tahoe, Swift 6.3.3, TextBundle v2, and FSNotes. Format changes are reported during preflight: optional metadata drift produces warnings, while structural changes that could silently lose sheet content stop migration by default. Maintainers can inspect an unverified format with the CLI's `--allow-unknown-format` override.
 
-## Migrate In 3 Steps
+## Choose Your Migration
 
-1. Create a fresh Ulysses backup, separately export any Ulysses **External Folders**, and back up your current FSNotes storage. Ulysses enables local backups automatically, so there is normally nothing to configure, but the app must have been open for at least five minutes before an automatic backup is created. For a guaranteed current backup, choose **Ulysses > Settings > Backup > Backup now**. Ulysses backups do not contain External Folders. See [Ulysses' backup guide](https://help.ulysses.app/backups).
+| You want to... | Start here |
+| --- | --- |
+| Migrate with a guided Mac interface and no Terminal commands | [Guided Mac App](#guided-mac-app) |
+| Migrate from Terminal, a script, or a coding agent | [Command-Line Interface](#command-line-interface) |
 
-2. Download the notarized release from [GitHub Releases](https://github.com/deverman/export-ulysses/releases). Open **Export Ulysses.app** for the guided migration, or use the included `export-ulysses` command-line tool. Both use the same tested migration library.
+The Mac app and CLI use the same migration engine, compatibility checks, and output validator.
 
-   To build from source instead:
+## Guided Mac App
 
-   ```sh
-   git clone https://github.com/deverman/export-ulysses.git
-   cd export-ulysses
-   swift build -c release
-   alias export-ulysses="$PWD/.build/release/export-ulysses"
-   ```
+This is the recommended path for most people. **Export Ulysses.app** guides you through choosing a backup and destination, checking the migration, and creating the FSNotes files.
 
-3. In **Export Ulysses.app**, confirm the discovered backup and destination, select **Run Preflight**, review the results, and select **Migrate to FSNotes**.
+### Migrate With The App In 3 Steps
 
-   CLI users can run the equivalent workflow:
+1. **Prepare your libraries.** In Ulysses, choose **Settings > Backup > Backup now** and wait for it to finish. Separately export any Ulysses **External Folders**, because they are not included in a Ulysses backup. Back up your current FSNotes storage before importing anything. See [Ulysses' backup guide](https://help.ulysses.app/backups).
+
+2. **Open the migration app.** Download the notarized release from [GitHub Releases](https://github.com/deverman/export-ulysses/releases), open **Export Ulysses.app**, and choose your `.ulbackup` package. For the destination, choose a parent folder; the app creates a new `FSNotes Ulysses Migration` folder inside it. The direct-download app can discover the newest local backup, while the App Store version asks you to select it because of macOS privacy protections.
+
+3. **Check, then migrate.** Select **Run Preflight**, review any warnings, and select **Migrate to FSNotes**. Do not import the result until the app reports that validation passed.
+
+If the app cannot find a backup, leave Ulysses open for at least five minutes after choosing **Backup now**, then select **Check Again**. You can also select **Choose** and locate a backup with **Ulysses > File > Browse Backups > Reveal in Finder**. Local Ulysses backups do not sync between Macs.
+
+Continue with [Add The Migration To FSNotes](#add-the-migration-to-fsnotes) after the export succeeds.
+
+## Command-Line Interface
+
+The CLI is intended for developers, Terminal users, scripts, and coding agents. It exposes the same preflight and migration behavior as the Mac app without depending on SwiftUI.
+
+### Install The CLI
+
+Download the notarized command-line tool from [GitHub Releases](https://github.com/deverman/export-ulysses/releases), or build it from source with Swift 6.3.3:
+
+```sh
+git clone https://github.com/deverman/export-ulysses.git
+cd export-ulysses
+swift build -c release
+alias export-ulysses="$PWD/.build/release/export-ulysses"
+```
+
+### Migrate With The CLI In 3 Steps
+
+1. **Create a current backup.** In Ulysses, choose **Settings > Backup > Backup now**. Separately export External Folders and back up the existing FSNotes storage.
+
+2. **Run preflight.** Check the backup format, destination, free space, and expected migration totals before writing notes:
 
    ```sh
    export-ulysses doctor --output "$HOME/Documents/FSNotes Ulysses Migration"
+   ```
+
+3. **Create the migration.** Use the same new destination after preflight succeeds:
+
+   ```sh
    export-ulysses migrate "$HOME/Documents/FSNotes Ulysses Migration"
    ```
 
-The newest local `.ulbackup` is selected automatically. Pass `--backup "/path/to/Backup.ulbackup"` to use another backup. The default is `--jobs 2`; advanced users can raise it explicitly.
+The CLI selects the newest readable local `.ulbackup` by default. Use `--backup "/path/to/Backup.ulbackup"` for another backup. Processing defaults to `--jobs 2`; raise it explicitly only when needed.
 
-If automatic discovery reports that no backup exists, leave Ulysses open for at least five minutes or use **Backup now**, then rerun `doctor`. On another Mac or an exported backup, pass its path with `--backup`; local Ulysses backups do not sync between devices.
+```text
+export-ulysses doctor [--backup PATH] [--output PATH] [--jobs 2]
+export-ulysses migrate OUTPUT [--backup PATH] [--jobs 2]
+export-ulysses --version
+```
 
-### Add The Migration To FSNotes
+`--allow-unknown-format` is a developer escape hatch, not a migration recommendation. It permits investigation of format drift but cannot make an unknown schema trustworthy.
+
+### Automation And Coding Agents
+
+- Use explicit absolute paths for `--backup` and the migration output instead of relying on backup discovery.
+- Run `doctor` first and stop if it returns a failure. Do not automatically retry with `--allow-unknown-format`.
+- Use a new destination folder. The exporter deliberately refuses to merge into or replace existing output.
+- Treat the visible migration report and private manifest as personal data. The anonymous support JSON under `.export-ulysses/` is the file intended for public bug reports.
+- Review [Compatibility](docs/COMPATIBILITY.md), [Validation](docs/VALIDATION.md), and [Troubleshooting](docs/TROUBLESHOOTING.md) before building unattended workflows.
+
+For project work, see [Development and dependencies](docs/DEVELOPMENT.md), [Contributing](CONTRIBUTING.md), [Security and privacy](SECURITY.md), the [release checklist](docs/RELEASE_CHECKLIST.md), and the [Mac App Store architecture](docs/APP_STORE.md).
+
+## Add The Migration To FSNotes
 
 **If you already use FSNotes, keep your current Default Storage.** The least disruptive approach is to choose that existing storage folder as the destination parent in Export Ulysses. The app creates a new `FSNotes Ulysses Migration` child folder, so imported notes stay together and FSNotes discovers them without replacing or mixing them with your existing files. If you exported elsewhere, add the migration folder as an external folder for review, or move the complete folder under your existing Default Storage while FSNotes is closed.
 
@@ -98,32 +146,10 @@ FSNotes Ulysses Migration/
 
 The `_Ulysses Migration` folder contains at most five companion notes: export report, library map, group metadata, favorites, and saved filters. After reviewing it in FSNotes, disable **Show notes in Notes and Todo lists** for that folder.
 
-## Commands
-
-```text
-export-ulysses doctor [--backup PATH] [--output PATH] [--jobs 2]
-export-ulysses migrate OUTPUT [--backup PATH] [--jobs 2]
-export-ulysses --version
-```
-
-`--allow-unknown-format` is a developer escape hatch, not a migration recommendation. It permits inspection of format drift but cannot make an unknown schema trustworthy.
-
-## Guided Mac App
-
-The release archive includes **Export Ulysses.app** for users who prefer not to work in Terminal. It automatically discovers the newest local backup, provides native backup and destination pickers, runs the same preflight checks as the CLI, displays migration totals and progress, and publishes the output only after the shared validator passes.
-
-The app is a separate executable target over `UlyssesExporter`; the CLI remains fully supported and does not launch or depend on SwiftUI.
-
-## Help
+## Getting Help
 
 - [Troubleshooting and FAQ](docs/TROUBLESHOOTING.md)
 - [Compatibility policy](docs/COMPATIBILITY.md)
-- [Real-library validation](docs/VALIDATION.md)
-- [Development and dependencies](docs/DEVELOPMENT.md)
-- [Release tool](docs/DEVELOPMENT.md#release-tool)
-- [Release checklist](docs/RELEASE_CHECKLIST.md)
-- [Mac App Store architecture and submission](docs/APP_STORE.md)
-- [Contributing](CONTRIBUTING.md)
 - [Security and privacy](SECURITY.md)
 
 When filing an issue, attach only `.export-ulysses/ulysses-export-report.json` unless a maintainer specifically requests privately reviewed evidence.

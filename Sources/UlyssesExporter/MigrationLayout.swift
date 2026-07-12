@@ -168,31 +168,41 @@ struct OutputNameResolver: Sendable, Equatable {
     private let namesBySourcePath: [String: String]
 
     init(prepared: [PreparedSheetSource], groupPaths: MigrationLayout) {
-        let byFolder = Dictionary(grouping: prepared) {
-            groupPaths.outputPath(for: $0.source).map(sanitizedFileName).joined(separator: "/").lowercased()
+        let allocationGroups = Dictionary(grouping: prepared) { item in
+            if item.prepared.roles.contains(.trash) {
+                return "trash/" + groupPaths.outputPath(for: item.source)
+                    .map(sanitizedFileName)
+                    .joined(separator: "/")
+                    .lowercased()
+            }
+            return "fsnotes-searchable"
         }
         var resolved: [String: String] = [:]
 
-        for items in byFolder.values {
+        for (allocationGroup, items) in allocationGroups {
             let byRequestedName = Dictionary(grouping: items) { $0.prepared.bundleName.lowercased() }
-            var used = Set<String>()
+            var used = allocationGroup == "fsnotes-searchable" ? Self.reservedCompanionNames : []
             var duplicates: [PreparedSheetSource] = []
 
             for group in byRequestedName.values {
                 let sorted = group.sorted { $0.source.packageURL.path < $1.source.packageURL.path }
                 guard let primary = sorted.first else { continue }
-                resolved[primary.source.packageURL.standardizedFileURL.path] = primary.prepared.bundleName
-                used.insert(primary.prepared.bundleName.lowercased())
+                if used.contains(primary.prepared.bundleName.lowercased()) {
+                    duplicates.append(primary)
+                } else {
+                    resolved[primary.source.packageURL.standardizedFileURL.path] = primary.prepared.bundleName
+                    used.insert(primary.prepared.bundleName.lowercased())
+                }
                 duplicates.append(contentsOf: sorted.dropFirst())
             }
 
             for item in duplicates.sorted(by: Self.allocationOrder) {
                 let base = item.prepared.bundleName
                 var counter = 1
-                var candidate = "\(base) (\(counter))"
+                var candidate = disambiguatedFileName(base, counter: counter)
                 while used.contains(candidate.lowercased()) {
                     counter += 1
-                    candidate = "\(base) (\(counter))"
+                    candidate = disambiguatedFileName(base, counter: counter)
                 }
                 resolved[item.source.packageURL.standardizedFileURL.path] = candidate
                 used.insert(candidate.lowercased())
@@ -200,6 +210,14 @@ struct OutputNameResolver: Sendable, Equatable {
         }
         namesBySourcePath = resolved
     }
+
+    private static let reservedCompanionNames: Set<String> = [
+        "ulysses export report",
+        "ulysses favorites",
+        "ulysses group metadata",
+        "ulysses library map",
+        "ulysses saved filters"
+    ]
 
     func name(for source: SheetSource) -> String {
         namesBySourcePath[source.packageURL.standardizedFileURL.path]

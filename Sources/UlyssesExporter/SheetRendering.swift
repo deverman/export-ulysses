@@ -630,6 +630,12 @@ func sanitizedFileName(_ name: String) -> String {
     return sanitized.isEmpty ? "Untitled" : String(sanitized.prefix(180))
 }
 
+func disambiguatedFileName(_ name: String, counter: Int) -> String {
+    let base = sanitizedFileName(name)
+    let suffix = " (\(counter))"
+    return String(base.prefix(max(1, 180 - suffix.count))) + suffix
+}
+
 private func tagSlug(_ value: String) -> String {
     let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_/"))
     return value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" }

@@ -95,6 +95,19 @@ struct OutputValidator {
         }
 
         let trashURL = root.appendingPathComponent("Trash", isDirectory: true)
+        let trashPath = trashURL.standardizedFileURL.path + "/"
+        let searchableBundles = bundles.filter {
+            !$0.standardizedFileURL.path.hasPrefix(trashPath)
+        }
+        let bundlesByLookupName = Dictionary(grouping: searchableBundles) {
+            $0.deletingPathExtension().lastPathComponent.lowercased()
+        }
+        if let ambiguous = bundlesByLookupName.first(where: { $0.value.count > 1 }) {
+            throw ExportError.validationFailed(
+                "FSNotes lookup name '\(ambiguous.key)' is used by \(ambiguous.value.count) non-trash TextBundles."
+            )
+        }
+
         let trashBundles = try textBundles(in: trashURL).count
         guard trashBundles == summary.trashSheets else {
             throw ExportError.validationFailed("Expected \(summary.trashSheets) Ulysses Trash sheets in FSNotes Trash but found \(trashBundles).")

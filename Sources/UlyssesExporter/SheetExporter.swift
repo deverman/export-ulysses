@@ -157,7 +157,8 @@ struct SheetExporter {
     }
 
     private func isFavorite(_ source: SheetSource, sheet: UlyssesSheet) -> Bool {
-        sheet.isFavorite || favoriteSheetPaths.contains(source.packageURL.standardizedFileURL.path)
+        guard !isUlyssesTrash(url: source.packageURL) else { return false }
+        return sheet.isFavorite || favoriteSheetPaths.contains(source.packageURL.standardizedFileURL.path)
     }
 }
 
