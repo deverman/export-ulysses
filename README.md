@@ -6,7 +6,7 @@ Verified with Ulysses 40 build 83290, macOS 26 Tahoe, Swift 6.3.2, TextBundle v2
 
 ## Migrate In 3 Steps
 
-1. Before starting, make a fresh Ulysses backup, separately export any Ulysses **External Folders**, and back up your current FSNotes storage. Ulysses backups do not contain External Folders.
+1. Create a fresh Ulysses backup, separately export any Ulysses **External Folders**, and back up your current FSNotes storage. Ulysses enables local backups automatically, so there is normally nothing to configure, but the app must have been open for at least five minutes before an automatic backup is created. For a guaranteed current backup, choose **Ulysses > Settings > Backup > Backup now**. Ulysses backups do not contain External Folders. See [Ulysses' backup guide](https://help.ulysses.app/backups).
 
 2. Download the notarized binary from [GitHub Releases](https://github.com/deverman/export-ulysses/releases), or build from source:
 
@@ -25,6 +25,8 @@ Verified with Ulysses 40 build 83290, macOS 26 Tahoe, Swift 6.3.2, TextBundle v2
    ```
 
 The newest local `.ulbackup` is selected automatically. Pass `--backup "/path/to/Backup.ulbackup"` to use another backup. The default is `--jobs 2`; advanced users can raise it explicitly.
+
+If automatic discovery reports that no backup exists, leave Ulysses open for at least five minutes or use **Backup now**, then rerun `doctor`. On another Mac or an exported backup, pass its path with `--backup`; local Ulysses backups do not sync between devices.
 
 After validation succeeds, open **FSNotes > Settings > General** and select the migration folder as **Default Storage**. Do not merely add it as an external folder. In **Settings > Advanced**, verify that Trash points to the migration folder's `Trash` directory before using Empty Trash.
 

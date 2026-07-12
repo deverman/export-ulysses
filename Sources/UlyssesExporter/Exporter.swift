@@ -427,7 +427,7 @@ public enum ExportError: Error, LocalizedError {
         case .unverifiedFormat(let reasons):
             "This backup does not match the verified Ulysses 40 format. \(reasons.joined(separator: " ")) Run `export-ulysses doctor` and attach its anonymous support JSON. Developers may inspect with --allow-unknown-format, but should not trust that export without validation."
         case .backupDiscoveryFailed(let path):
-            "No Ulysses backup was found in \(path). In Ulysses choose Help > Open Backup, or pass --backup with a .ulbackup path."
+            "No Ulysses backup was found in \(path). In Ulysses choose Settings > Backup > Backup now, then rerun this command. You can also choose File > Browse Backups or pass --backup with an exported .ulbackup path."
         case .validationFailed(let reason):
             "The staged migration failed validation and was not published. \(reason) Run `export-ulysses doctor` and attach the anonymous support JSON when reporting this problem."
         }

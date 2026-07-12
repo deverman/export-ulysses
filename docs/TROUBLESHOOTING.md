@@ -2,7 +2,7 @@
 
 ## Before You Run It
 
-1. In Ulysses, create a fresh backup or leave the app open long enough for its current backup to complete.
+1. Ulysses local backups are enabled automatically, but the app must be open for at least five minutes to create an automatic backup. For a guaranteed current backup, choose **Ulysses > Settings > Backup > Backup now**.
 2. Export Ulysses External Folders separately; they are not in `.ulbackup` files.
 3. Back up the current FSNotes Default Storage folder.
 4. Choose a new empty destination with enough free disk space.
@@ -35,6 +35,10 @@ The exporter is a one-time migration, not an incremental sync. It refuses a non-
 ## Full Disk Access
 
 If the backup cannot be read, grant Full Disk Access to the terminal application running the command, restart that application, and rerun `doctor`. The error prints the exact unreadable path.
+
+## No Ulysses Backup Was Found
+
+Open Ulysses and choose **Ulysses > Settings > Backup > Backup now**, then rerun `doctor`. You can inspect available local backups with **File > Browse Backups**. Backups are local to each device and do not sync, so use `--backup "/path/to/exported.ulbackup"` when migrating a backup copied from another Mac.
 
 ## Reporting A Problem
 
