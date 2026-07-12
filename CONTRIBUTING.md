@@ -1,6 +1,10 @@
 # Contributing
 
-Open an issue before changing migration semantics. A fidelity change needs a minimal synthetic fixture, a regression test, and an explanation of how both Ulysses and FSNotes represent the data.
+Before changing what the exporter preserves or how exported notes appear in FSNotes, open an issue so the expected behavior can be agreed on first. The pull request should include:
+
+- a small example made from fictional content that demonstrates the case;
+- an automated test that would fail without the change; and
+- a short explanation of how the item appears in Ulysses and what users should see in FSNotes after migration.
 
 Pull requests must keep private content out of fixtures and logs, pass `swift test`, preserve atomic output, and update the compatibility or troubleshooting documentation when user-visible behavior changes.
 
