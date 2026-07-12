@@ -8,7 +8,9 @@ Verified with Ulysses 40 build 83290, macOS 26 Tahoe, Swift 6.3.2, TextBundle v2
 
 1. Create a fresh Ulysses backup, separately export any Ulysses **External Folders**, and back up your current FSNotes storage. Ulysses enables local backups automatically, so there is normally nothing to configure, but the app must have been open for at least five minutes before an automatic backup is created. For a guaranteed current backup, choose **Ulysses > Settings > Backup > Backup now**. Ulysses backups do not contain External Folders. See [Ulysses' backup guide](https://help.ulysses.app/backups).
 
-2. Download the notarized binary from [GitHub Releases](https://github.com/deverman/export-ulysses/releases), or build from source:
+2. Download the notarized release from [GitHub Releases](https://github.com/deverman/export-ulysses/releases). Open **Export Ulysses.app** for the guided migration, or use the included `export-ulysses` command-line tool. Both use the same tested migration library.
+
+   To build from source instead:
 
    ```sh
    git clone https://github.com/deverman/export-ulysses.git
@@ -17,7 +19,9 @@ Verified with Ulysses 40 build 83290, macOS 26 Tahoe, Swift 6.3.2, TextBundle v2
    alias export-ulysses="$PWD/.build/release/export-ulysses"
    ```
 
-3. Check the newest local backup, then migrate to a new dedicated folder outside this repository:
+3. In **Export Ulysses.app**, confirm the discovered backup and destination, select **Run Preflight**, review the results, and select **Migrate to FSNotes**.
+
+   CLI users can run the equivalent workflow:
 
    ```sh
    export-ulysses doctor --output "$HOME/Documents/FSNotes Ulysses Migration"
@@ -85,6 +89,12 @@ export-ulysses --version
 ```
 
 `--allow-unknown-format` is a developer escape hatch, not a migration recommendation. It permits inspection of format drift but cannot make an unknown schema trustworthy.
+
+## Guided Mac App
+
+The release archive includes **Export Ulysses.app** for users who prefer not to work in Terminal. It automatically discovers the newest local backup, provides native backup and destination pickers, runs the same preflight checks as the CLI, displays migration totals and progress, and publishes the output only after the shared validator passes.
+
+The app is a separate executable target over `UlyssesExporter`; the CLI remains fully supported and does not launch or depend on SwiftUI.
 
 ## Help
 

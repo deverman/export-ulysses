@@ -17,6 +17,11 @@ let package = Package(
             "UlyssesExporter",
             .product(name: "ArgumentParser", package: "swift-argument-parser")
         ]),
+        .executableTarget(
+            name: "ExportUlyssesApp",
+            dependencies: ["UlyssesExporter"],
+            path: "Sources/ExportUlyssesApp"
+        ),
         .testTarget(name: "UlyssesExporterTests", dependencies: ["UlyssesExporter"])
     ]
 )

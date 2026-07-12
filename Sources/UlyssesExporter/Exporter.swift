@@ -104,7 +104,7 @@ public struct ExportProgress: Sendable, Equatable {
     public let total: Int
 }
 
-public struct Exporter {
+public struct Exporter: Sendable {
     private let verbose: Bool
     private let maxConcurrentExports: Int
     private let progress: (@Sendable (ExportProgress) -> Void)?

@@ -6,6 +6,7 @@ Requires macOS 26 Tahoe and Swift 6.3.2 or newer.
 swift package resolve
 swift build
 swift test
+swift run ExportUlyssesApp
 ```
 
 Swift Argument Parser 1.8.2 is the only package dependency and is the latest release as of July 2026. Ulysses ordered mixed-content XML uses Foundation `XMLParser`; plist metadata uses `PropertyListSerialization`.
@@ -19,5 +20,6 @@ Architecture boundaries:
 - `MigrationNotes.swift`: consolidated human and private migration indexes
 - `OutputValidation.swift`: staging transaction and final TextBundle validation
 - `main.swift`: two-command CLI only
+- `Sources/ExportUlyssesApp`: SwiftUI presentation, native panels, progress, and FSNotes launch actions; no migration parsing or writing logic
 
 Do not weaken a compatibility gate to accommodate a new fixture. Add a versioned reader or expand the Ulysses 40 contract only with evidence from that exact version.

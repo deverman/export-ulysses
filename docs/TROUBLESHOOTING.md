@@ -34,7 +34,7 @@ The exporter is a one-time migration, not an incremental sync. It refuses a non-
 
 ## Full Disk Access
 
-If the backup cannot be read, grant Full Disk Access to the terminal application running the command, restart that application, and rerun `doctor`. The error prints the exact unreadable path.
+If the backup cannot be read, grant Full Disk Access to **Export Ulysses** or the terminal application running the CLI, restart that application, and rerun preflight or `doctor`. The error prints the exact unreadable path.
 
 ## No Ulysses Backup Was Found
 
