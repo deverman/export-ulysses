@@ -4,7 +4,7 @@ enum CLIOutput {
     static func printSummary(_ summary: ExportSummary, includePrivateDetails: Bool = true) {
         print("""
         Sheets: \(summary.sheets)
-        Sidebar notes: \(summary.sidebarNotes)
+        Ulysses sheet notes: \(summary.sidebarNotes)
         Sidebar file attachments: \(summary.fileAttachments)
         Inline images: \(summary.inlineImages)
         Keywords: \(summary.keywords)

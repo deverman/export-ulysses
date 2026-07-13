@@ -17,7 +17,7 @@ struct MigrationSummaryView: View {
                 Metric(label: "Sheets", value: summary.sheets, icon: "doc.text")
                 Metric(label: "Images", value: summary.inlineImages, icon: "photo")
                 Metric(label: "Attachments", value: summary.fileAttachments, icon: "paperclip")
-                Metric(label: "Sidebar notes", value: summary.sidebarNotes, icon: "text.bubble")
+                Metric(label: "Sheet notes", value: summary.sidebarNotes, icon: "text.bubble")
                 Metric(label: "Trash sheets", value: summary.trashSheets, icon: "trash")
                 Metric(label: "Missing media", value: summary.missingMedia, icon: "photo.badge.exclamationmark")
             }
