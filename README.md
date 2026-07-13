@@ -98,7 +98,9 @@ FSNotes only treats its configured Trash folder as system Trash. To retain the U
 | --- | --- |
 | Sheets and Markdown-compatible formatting | One TextBundle v2 note per sheet |
 | Inline images and file attachments | Copied into each bundle's `assets/` and linked relatively |
-| Sidebar notes, comments, annotations | Visible Markdown sections or markers |
+| Sheet notes | Appended to the same note under `## Ulysses Sidebar Notes`, with each note numbered |
+| Inline and block comments | Kept at their original text positions as visible `Ulysses comment` markers |
+| Annotations | Annotated text stays in place and the annotation follows as a visible `Ulysses annotation` marker |
 | Keywords | Searchable hashtags |
 | Groups and projects | FSNotes folders with deterministic collision handling |
 | Inbox | Root when used as a new Default Storage; contained in the migration folder when added to an existing library |
@@ -111,6 +113,18 @@ FSNotes only treats its configured Trash folder as system Trash. To retain the U
 | Creation and modification dates | TextBundle metadata and filesystem dates |
 
 FSNotes has no portable TextBundle field for native pins, Ulysses goals, group colors/icons, or per-folder sort settings. Those values are kept visibly rather than pretending FSNotes can recreate the Ulysses UI.
+
+### Where Notes And Annotations Go
+
+Ulysses sheet notes are not discarded or moved into separate FSNotes notes. They are appended near the end of the same exported sheet under `## Ulysses Sidebar Notes`, with headings such as `### Note 1`. Links and supported formatting inside the note remain Markdown.
+
+Ulysses comments and annotations remain beside the text they describe:
+
+- Inline comments become `**[Ulysses comment: ...]**` at the original position.
+- Comment paragraphs become `> **Ulysses comment:** ...` blockquotes.
+- Annotations keep the annotated text and add `**[Ulysses annotation: ...]**` immediately after it.
+
+FSNotes does not have Ulysses' Annotations sidebar or attachment-note interface, so these values are intentionally visible in the Markdown. Ulysses may show notes, comments, and annotations from several glued sheets together in its sidebar. The exporter creates one TextBundle per sheet, so each item appears in the sheet that owns it. Use `Ulysses Library Map` to see which separate FSNotes notes belonged to the same glued cluster.
 
 ## Known Limits
 

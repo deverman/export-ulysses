@@ -50,6 +50,7 @@ final class UlyssesExporterTests: XCTestCase {
         XCTAssertTrue(markdown.contains("![attachment.attach456.png](assets/attachment.attach456.png)"))
         XCTAssertTrue(markdown.contains("[download.file123.pdf](assets/download.file123.pdf)"))
         XCTAssertTrue(markdown.contains("## Ulysses Sidebar Notes"))
+        XCTAssertTrue(markdown.contains("### Note 1"))
         XCTAssertTrue(markdown.contains("Sidebar note text."))
         XCTAssertTrue(markdown.contains("#alpha #beta-value"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: bundle.appendingPathComponent("assets/example.abc123.png").path))
@@ -362,6 +363,10 @@ final class UlyssesExporterTests: XCTestCase {
         XCTAssertTrue(reportMarkdown.contains("- Sheets: 2"))
         XCTAssertTrue(reportMarkdown.contains("- Template sheets: 1"))
         XCTAssertTrue(reportMarkdown.contains("- Trash sheets: 1"))
+        XCTAssertTrue(reportMarkdown.contains("## Where Notes, Comments, And Annotations Went"))
+        XCTAssertTrue(reportMarkdown.contains("Sheet notes: appended to the same exported note under `## Ulysses Sidebar Notes`"))
+        XCTAssertTrue(reportMarkdown.contains("Annotations: annotated text stays in place"))
+        XCTAssertTrue(reportMarkdown.contains("Glued sheets: exported as separate TextBundles"))
         XCTAssertTrue(reportMarkdown.contains("## Finish In FSNotes"))
         XCTAssertTrue(reportMarkdown.contains("FSNotes Empty Trash permanently deletes"))
 
